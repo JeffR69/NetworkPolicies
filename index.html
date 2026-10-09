@@ -57,7 +57,7 @@
   label.field { display: block; }
   label.field > span { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  input[type=text], input[type=number], select, textarea {
+  input[type=text], input[type=number], input[type=password], select, textarea {
     width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px;
     background: var(--panel); color: var(--text); font: inherit; }
   textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; resize: vertical; }
@@ -159,8 +159,8 @@
     <p>Définissez le contexte, les security groups et les flux : les objets YAML sont générés à la fin.</p>
   </div>
   <div class="tools">
-    <button type="button" class="small" id="exportBtn" title="Sauvegarder la saisie dans un fichier JSON">Exporter projet</button>
-    <button type="button" class="small" id="importBtn" title="Recharger un fichier JSON exporté">Importer projet</button>
+    <button type="button" class="small" id="saveCfgBtn" title="Télécharger la configuration complète (fichier horodaté)">Enregistrer config</button>
+    <button type="button" class="small" id="loadCfgBtn" title="Recharger un fichier de configuration">Charger config</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <button type="button" class="small" id="resetBtn">Nouveau</button>
     <button type="button" class="small" id="themeBtn" title="Changer de thème">◐</button>
@@ -270,8 +270,8 @@
   const SG_LABEL = 'neos/vm.dfw-sg';
   const NET_LABEL = 'neos/vm.dfw-network';
   const ANY = '*any*';
-  // Séparateur des noms d'application : « _ » est refusé par l'API Kubernetes (RFC 1123), « . » est accepté.
-  const NA_SEP = '.';
+  // Séparateur des noms d'application (« _ » est refusé par l'API Kubernetes, RFC 1123)
+  const NA_SEP = '-';
   const PROTOS = ['TCP', 'UDP', 'SCTP'];
 
   const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
@@ -398,7 +398,7 @@
     const apps = [...new Set(p.apps)];
     const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
     if (p.self) return ng + sideName(p.src) + '-allow-self';
-    if (p.dir === 'both') return ng + 'north-south';
+    if (p.dir === 'both') return ng + 'bypass-nord-sud';
     return p.dir === 'ingress'
       ? ng + sideName(p.dst) + '-ingress-from-' + sideName(p.src) + suffix
       : ng + sideName(p.src) + '-egress-to-' + sideName(p.dst) + suffix;
@@ -928,17 +928,41 @@
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
   $('dlBtn').onclick = () => download((S.meta.ng || S.meta.nadName || 'multinetworkpolicy') + '.yaml', fullYaml, 'application/x-yaml');
-  $('exportBtn').onclick = () => {
+
+  /* ================= Fichier de configuration ================= */
+  const CFG_FORMAT = 'mnp-firewall-config';
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = (d) => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  const cfgFileName = (d) => S.meta.namespace + '_' + S.meta.nadName + '_' + stamp(d) + '.json';
+  function buildConfig(d) {
     const { step, ...rest } = S;
-    download((S.meta.ng || S.meta.nadName || 'projet') + '.mnp.json', JSON.stringify({ ...rest, customServices: custom }, null, 2), 'application/json');
+    return JSON.stringify({ format: CFG_FORMAT, version: 1, savedAt: d.toISOString(), namespace: S.meta.namespace, nad: S.meta.nadName,
+      ...rest, customServices: custom }, null, 2) + '\n';
+  }
+  function applyConfig(text, source) {
+    const d = JSON.parse(text);
+    if (!d || typeof d !== 'object' || (!d.meta && !d.flows)) throw new Error('ce fichier n\'est pas une configuration du générateur');
+    const hasWork = S.sgs.length || S.flows.length;
+    if (hasWork && !confirm('Remplacer la saisie actuelle par « ' + source + ' » ?')) return false;
+    mergeServices(d.customServices);
+    loadAll({ ...d, step: 1 });
+    return true;
+  }
+
+  $('saveCfgBtn').onclick = () => {
+    if (!S.meta.namespace || !S.meta.nadName) { alert('Renseignez le namespace et la NAD (étape 1) : ils composent le nom du fichier.'); return; }
+    const now = new Date();
+    download(cfgFileName(now), buildConfig(now), 'application/json');
   };
-  $('importBtn').onclick = () => $('importFile').click();
+  $('loadCfgBtn').onclick = () => $('importFile').click();
   $('importFile').onchange = async (e) => {
     const file = e.target.files[0]; if (!file) return;
-    try { const d = JSON.parse(await file.text()); mergeServices(d.customServices); loadAll({ ...d, step: 1 }); }
+    try { applyConfig(await file.text(), file.name); }
     catch (err) { alert('Fichier invalide : ' + err.message); }
     e.target.value = '';
   };
+  // Nettoyage des réglages de l'ancienne sauvegarde GitHub (jeton éventuellement mémorisé)
+  try { localStorage.removeItem('mnp-git-v1'); localStorage.removeItem('mnp-git-token'); sessionStorage.removeItem('mnp-git-token'); } catch (e) {}
   $('resetBtn').onclick = () => { if (confirm('Effacer toute la saisie ? (les services personnalisés sont conservés)')) loadAll(blank()); };
 
   // Thème
