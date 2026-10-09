@@ -57,7 +57,7 @@
   label.field { display: block; }
   label.field > span { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  input[type=text], input[type=number], select, textarea {
+  input[type=text], input[type=number], input[type=password], select, textarea {
     width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px;
     background: var(--panel); color: var(--text); font: inherit; }
   textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; resize: vertical; }
@@ -148,6 +148,20 @@
   .pk-list li.none { color: var(--muted); font-style: italic; cursor: default; }
   .svc-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; }
   @media (max-width: 560px) { .svc-bar { grid-template-columns: 1fr; } }
+  dialog { border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--panel); color: var(--text); width: min(640px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg { padding: 16px; }
+  .dlg h3 { margin: 0 0 8px; font-size: 16px; }
+  .dlg-sec { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; display: grid; gap: 6px; justify-items: start; }
+  .dlg-sec > * { justify-self: stretch; }
+  .dlg-sec > button { justify-self: start; }
+  .git-set { margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+  body > .git-set { display: none; }
+  .cfg-list { list-style: none; padding: 0; margin: 8px 0 0; max-height: 260px; overflow-y: auto; }
+  .cfg-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .cfg-list li code { overflow-wrap: anywhere; }
+  .cfg-list li.cur code { font-weight: 700; }
+  .cfg-list li.none { color: var(--muted); font-style: italic; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -159,8 +173,8 @@
     <p>Définissez le contexte, les security groups et les flux : les objets YAML sont générés à la fin.</p>
   </div>
   <div class="tools">
-    <button type="button" class="small" id="exportBtn" title="Sauvegarder la saisie dans un fichier JSON">Exporter projet</button>
-    <button type="button" class="small" id="importBtn" title="Recharger un fichier JSON exporté">Importer projet</button>
+    <button type="button" class="small" id="saveCfgBtn" title="Enregistrer la configuration complète (fichier horodaté)">Enregistrer config</button>
+    <button type="button" class="small" id="loadCfgBtn" title="Recharger une configuration enregistrée">Charger config</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <button type="button" class="small" id="resetBtn">Nouveau</button>
     <button type="button" class="small" id="themeBtn" title="Changer de thème">◐</button>
@@ -259,6 +273,48 @@
 </section>
 </div>
 
+<dialog id="saveDlg" aria-labelledby="saveTitle">
+  <form method="dialog" class="dlg">
+    <h3 id="saveTitle">Enregistrer la configuration</h3>
+    <p class="hint" style="margin-top:0">Fichier : <code id="cfgName"></code></p>
+    <label class="chk"><input type="checkbox" id="saveLocal" checked> <span>Sur ce poste (téléchargement)</span></label>
+    <label class="chk" style="margin-top:6px"><input type="checkbox" id="saveGit"> <span>Dans le dépôt Git (GitHub)</span></label>
+    <div data-gitslot></div>
+    <ul class="msgs err" id="saveErr"></ul>
+    <p class="status" id="saveStatus" aria-live="polite"></p>
+    <div class="navbtns"><button value="cancel" formnovalidate>Fermer</button><button type="button" class="primary" id="saveGo">Enregistrer</button></div>
+  </form>
+</dialog>
+
+<dialog id="loadDlg" aria-labelledby="loadTitle">
+  <form method="dialog" class="dlg">
+    <h3 id="loadTitle">Charger une configuration</h3>
+    <div class="dlg-sec"><b>Depuis ce poste</b>
+      <button type="button" id="loadLocal">Choisir un fichier…</button></div>
+    <div class="dlg-sec"><b>Depuis le dépôt Git (GitHub)</b>
+      <div data-gitslot></div>
+      <div style="display:flex;gap:8px;margin-top:8px"><input type="text" id="gitFilter" placeholder="Filtrer (namespace, NAD, date…)" spellcheck="false">
+        <button type="button" id="gitList">Lister</button></div>
+      <ul class="cfg-list" id="cfgList"></ul>
+    </div>
+    <ul class="msgs err" id="loadErr"></ul>
+    <div class="navbtns"><span></span><button value="cancel" formnovalidate>Fermer</button></div>
+  </form>
+</dialog>
+
+<div id="gitSettings" class="git-set">
+  <div class="grid2">
+    <label class="field"><span>Propriétaire</span><input type="text" id="g_owner" spellcheck="false"></label>
+    <label class="field"><span>Dépôt</span><input type="text" id="g_repo" spellcheck="false"></label>
+    <label class="field"><span>Branche</span><input type="text" id="g_branch" spellcheck="false"></label>
+    <label class="field"><span>Dossier</span><input type="text" id="g_folder" spellcheck="false"></label>
+  </div>
+  <label class="field" style="margin-top:8px"><span>Jeton GitHub</span><input type="password" id="g_token" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+  <label class="chk" style="margin-top:6px;font-weight:400"><input type="checkbox" id="g_remember"> <span>Mémoriser le jeton dans ce navigateur</span></label>
+  <div class="hint">Jeton « fine-grained » limité à ce dépôt, permission <i>Contents : Read and write</i>. Il reste dans le navigateur
+    et n'est envoyé qu'à <code>api.github.com</code>. Sans jeton, la lecture marche seulement sur un dépôt public.</div>
+</div>
+
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -270,8 +326,8 @@
   const SG_LABEL = 'neos/vm.dfw-sg';
   const NET_LABEL = 'neos/vm.dfw-network';
   const ANY = '*any*';
-  // Séparateur des noms d'application : « _ » est refusé par l'API Kubernetes (RFC 1123), « . » est accepté.
-  const NA_SEP = '.';
+  // Séparateur des noms d'application (« _ » est refusé par l'API Kubernetes, RFC 1123)
+  const NA_SEP = '-';
   const PROTOS = ['TCP', 'UDP', 'SCTP'];
 
   const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
@@ -398,7 +454,7 @@
     const apps = [...new Set(p.apps)];
     const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
     if (p.self) return ng + sideName(p.src) + '-allow-self';
-    if (p.dir === 'both') return ng + 'north-south';
+    if (p.dir === 'both') return ng + 'bypass-nord-sud';
     return p.dir === 'ingress'
       ? ng + sideName(p.dst) + '-ingress-from-' + sideName(p.src) + suffix
       : ng + sideName(p.src) + '-egress-to-' + sideName(p.dst) + suffix;
@@ -928,17 +984,169 @@
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
   $('dlBtn').onclick = () => download((S.meta.ng || S.meta.nadName || 'multinetworkpolicy') + '.yaml', fullYaml, 'application/x-yaml');
-  $('exportBtn').onclick = () => {
+
+  /* ================= Fichier de configuration ================= */
+  const CFG_FORMAT = 'mnp-firewall-config';
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = (d) => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  const cfgFileName = (d) => S.meta.namespace + '_' + S.meta.nadName + '_' + stamp(d) + '.json';
+  function buildConfig(d) {
     const { step, ...rest } = S;
-    download((S.meta.ng || S.meta.nadName || 'projet') + '.mnp.json', JSON.stringify({ ...rest, customServices: custom }, null, 2), 'application/json');
+    return JSON.stringify({ format: CFG_FORMAT, version: 1, savedAt: d.toISOString(), namespace: S.meta.namespace, nad: S.meta.nadName,
+      ...rest, customServices: custom }, null, 2) + '\n';
+  }
+  function applyConfig(text, source) {
+    const d = JSON.parse(text);
+    if (!d || typeof d !== 'object' || (!d.meta && !d.flows)) throw new Error('ce fichier n\'est pas une configuration du générateur');
+    const hasWork = S.sgs.length || S.flows.length;
+    if (hasWork && !confirm('Remplacer la saisie actuelle par « ' + source + ' » ?')) return false;
+    mergeServices(d.customServices);
+    loadAll({ ...d, step: 1 });
+    return true;
+  }
+
+  // --- Dépôt Git (API GitHub) ---
+  const GIT_KEY = 'mnp-git-v1', TOKEN_KEY = 'mnp-git-token';
+  function gitDefaults() {
+    const h = location.hostname;
+    if (h.endsWith('.github.io')) return { owner: h.split('.')[0], repo: location.pathname.split('/').filter(Boolean)[0] || h, branch: 'main', folder: 'configs' };
+    return { owner: 'JeffR69', repo: 'NetworkPolicies', branch: 'main', folder: 'configs' };
+  }
+  function loadGitSettings() {
+    let g = gitDefaults();
+    try { g = { ...g, ...JSON.parse(localStorage.getItem(GIT_KEY) || '{}') }; } catch (e) {}
+    ['owner', 'repo', 'branch', 'folder'].forEach(k => { $('g_' + k).value = g[k] || ''; });
+    let t = '', remembered = false;
+    try { t = sessionStorage.getItem(TOKEN_KEY) || ''; } catch (e) {}
+    try { const l = localStorage.getItem(TOKEN_KEY); if (l) { t = l; remembered = true; } } catch (e) {}
+    $('g_token').value = t; $('g_remember').checked = remembered;
+  }
+  function gitCfg() {
+    const g = {};
+    ['owner', 'repo', 'branch', 'folder'].forEach(k => { g[k] = $('g_' + k).value.trim(); });
+    g.folder = g.folder.replace(/^\/+|\/+$/g, '');
+    try { localStorage.setItem(GIT_KEY, JSON.stringify(g)); } catch (e) {}
+    g.token = $('g_token').value.trim();
+    try {
+      sessionStorage.setItem(TOKEN_KEY, g.token);
+      if ($('g_remember').checked && g.token) localStorage.setItem(TOKEN_KEY, g.token); else localStorage.removeItem(TOKEN_KEY);
+    } catch (e) {}
+    if (!g.owner || !g.repo || !g.branch) throw new Error('renseignez propriétaire, dépôt et branche');
+    return g;
+  }
+  const encPath = (p) => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  async function gh(g, path, opts = {}) {
+    const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (g.token) headers.Authorization = 'Bearer ' + g.token;
+    let r;
+    try { r = await fetch('https://api.github.com/repos/' + encodeURIComponent(g.owner) + '/' + encodeURIComponent(g.repo) + path, { ...opts, headers: { ...headers, ...(opts.headers || {}) } }); }
+    catch (e) { throw new Error('GitHub injoignable (réseau ou proxy)'); }
+    if (!r.ok) {
+      let msg = ''; try { msg = (await r.json()).message || ''; } catch (e) {}
+      const hint = { 401: 'jeton invalide ou expiré', 403: 'droits insuffisants ou quota dépassé', 404: 'dépôt, branche ou dossier introuvable (ou dépôt privé sans jeton)', 409: 'conflit sur la branche', 422: 'requête refusée' }[r.status] || '';
+      const e = new Error('GitHub ' + r.status + (hint ? ' : ' + hint : '') + (msg ? ' (' + msg + ')' : ''));
+      e.status = r.status; throw e;
+    }
+    return r.json();
+  }
+  function b64encode(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  const b64decode = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+
+  const showErrIn = (id, list) => { $(id).innerHTML = list.map(e => '<li>' + esc(e) + '</li>').join(''); };
+  function openDlg(id) {
+    $(id).querySelector('[data-gitslot]').appendChild($('gitSettings'));
+    loadGitSettings();
+    $(id).showModal();
+  }
+  function syncSaveDlg() {
+    $('saveGo').disabled = !$('saveLocal').checked && !$('saveGit').checked;
+    $('gitSettings').hidden = !$('saveGit').checked;
+  }
+  $('saveCfgBtn').onclick = () => {
+    showErrIn('saveErr', []); $('saveStatus').textContent = '';
+    $('cfgName').textContent = (S.meta.namespace || '<namespace>') + '_' + (S.meta.nadName || '<nad>') + '_AAAAMMJJ-HHMMSS.json';
+    openDlg('saveDlg'); syncSaveDlg();
   };
-  $('importBtn').onclick = () => $('importFile').click();
+  $('saveLocal').onchange = syncSaveDlg;
+  $('saveGit').onchange = syncSaveDlg;
+  $('saveGo').onclick = async () => {
+    showErrIn('saveErr', []); $('saveStatus').textContent = '';
+    if (!S.meta.namespace || !S.meta.nadName) { showErrIn('saveErr', ['Renseignez le namespace et la NAD (étape 1) : ils composent le nom du fichier.']); return; }
+    const now = new Date(), name = cfgFileName(now), text = buildConfig(now);
+    $('cfgName').textContent = name;
+    const done = [];
+    if ($('saveLocal').checked) { download(name, text, 'application/json'); done.push('téléchargé'); }
+    if ($('saveGit').checked) {
+      $('saveGo').disabled = true; $('saveStatus').textContent = 'Envoi vers GitHub…';
+      try {
+        const g = gitCfg();
+        if (!g.token) throw new Error('un jeton est nécessaire pour écrire dans le dépôt');
+        const path = (g.folder ? g.folder + '/' : '') + name;
+        await gh(g, '/contents/' + encPath(path), { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'Configuration ' + S.meta.namespace + '/' + S.meta.nadName + ' du ' + now.toLocaleString('fr-FR'), content: b64encode(text), branch: g.branch }) });
+        done.push('enregistré dans ' + g.owner + '/' + g.repo + ':' + g.branch + '/' + path);
+      } catch (e) { showErrIn('saveErr', ['Dépôt Git : ' + e.message + '.']); }
+      $('saveGo').disabled = false;
+    }
+    $('saveStatus').textContent = done.length ? name + ' : ' + done.join(' ; ') + ' ✓' : '';
+  };
+
+  $('loadCfgBtn').onclick = () => {
+    showErrIn('loadErr', []); $('cfgList').innerHTML = '';
+    $('gitSettings').hidden = false;
+    $('gitFilter').value = S.meta.namespace && S.meta.nadName ? S.meta.namespace + '_' + S.meta.nadName : '';
+    openDlg('loadDlg');
+  };
+  $('loadLocal').onclick = () => $('importFile').click();
   $('importFile').onchange = async (e) => {
     const file = e.target.files[0]; if (!file) return;
-    try { const d = JSON.parse(await file.text()); mergeServices(d.customServices); loadAll({ ...d, step: 1 }); }
-    catch (err) { alert('Fichier invalide : ' + err.message); }
+    try { if (applyConfig(await file.text(), file.name)) $('loadDlg').close(); }
+    catch (err) { showErrIn('loadErr', ['Fichier invalide : ' + err.message + '.']); }
     e.target.value = '';
   };
+  let gitFiles = [];
+  const tsOf = (n) => (n.match(/_(\d{8}-\d{6})\.json$/) || [, ''])[1];
+  function renderCfgList() {
+    const qv = $('gitFilter').value.trim().toLowerCase();
+    const cur = S.meta.namespace + '_' + S.meta.nadName + '_';
+    const list = gitFiles.filter(f => !qv || f.name.toLowerCase().includes(qv));
+    $('cfgList').innerHTML = list.length ? '' : '<li class="none">Aucune configuration' + (qv ? ' pour ce filtre' : '') + '.</li>';
+    list.forEach(f => {
+      const li = document.createElement('li');
+      if (f.name.startsWith(cur)) li.className = 'cur';
+      const ts = tsOf(f.name);
+      li.innerHTML = '<span><code></code><br><small class="hint"></small></span><button type="button" class="small">Charger</button>';
+      li.querySelector('code').textContent = f.name;
+      li.querySelector('small').textContent = ts ? ts.slice(6, 8) + '/' + ts.slice(4, 6) + '/' + ts.slice(0, 4) + ' ' + ts.slice(9, 11) + ':' + ts.slice(11, 13) + ':' + ts.slice(13, 15) : '';
+      li.querySelector('button').onclick = async () => {
+        showErrIn('loadErr', []);
+        try {
+          const g = gitCfg();
+          const d = await gh(g, '/contents/' + encPath(f.path) + '?ref=' + encodeURIComponent(g.branch));
+          if (applyConfig(b64decode(d.content || ''), f.name)) $('loadDlg').close();
+        } catch (e) { showErrIn('loadErr', ['Chargement : ' + e.message + '.']); }
+      };
+      $('cfgList').appendChild(li);
+    });
+  }
+  $('gitList').onclick = async () => {
+    showErrIn('loadErr', []); $('cfgList').innerHTML = '<li class="none">Chargement…</li>';
+    try {
+      const g = gitCfg();
+      let items = [];
+      try { items = await gh(g, '/contents/' + encPath(g.folder) + '?ref=' + encodeURIComponent(g.branch)); }
+      catch (e) { if (e.status !== 404 || !g.folder) throw e; items = []; }
+      gitFiles = (Array.isArray(items) ? items : []).filter(x => x.type === 'file' && /\.json$/i.test(x.name))
+        .sort((a, b) => tsOf(b.name).localeCompare(tsOf(a.name)) || a.name.localeCompare(b.name));
+      renderCfgList();
+    } catch (e) { $('cfgList').innerHTML = ''; showErrIn('loadErr', ['Dépôt Git : ' + e.message + '.']); }
+  };
+  $('gitFilter').addEventListener('input', () => { if (gitFiles.length) renderCfgList(); });
   $('resetBtn').onclick = () => { if (confirm('Effacer toute la saisie ? (les services personnalisés sont conservés)')) loadAll(blank()); };
 
   // Thème
