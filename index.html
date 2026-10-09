@@ -115,6 +115,9 @@
   .prefixed .pfx:not(:empty) + input { border-radius: 0 6px 6px 0; }
   code.selector { display: block; padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel); }
   .tag.ns { color: var(--ok); }
+  .off { opacity: .4; }
+  .selfbox { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; cursor: pointer; margin-left: 12px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+  .selfbox:has(input:checked) { border-color: var(--ok); color: var(--ok); }
   .nsbox { display: flex; gap: 10px; align-items: flex-start; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: pointer; }
   .nsbox input { margin-top: 3px; }
   .nsbox:has(input:checked) { border-color: var(--ok); }
@@ -394,6 +397,7 @@
     const ng = S.meta.ng ? S.meta.ng + '-' : '';
     const apps = [...new Set(p.apps)];
     const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
+    if (p.self) return ng + sideName(p.src) + '-allow-self';
     if (p.dir === 'both') return ng + 'north-south';
     return p.dir === 'ingress'
       ? ng + sideName(p.dst) + '-ingress-from-' + sideName(p.src) + suffix
@@ -452,6 +456,17 @@
       const fe = { src: false, dst: false, ports: new Set(), effects: [] };
       flowState[f.id] = fe;
       const src = side(f.src), dst = side(f.dst);
+      // allow-self : la source parle à elle-même, ingress + egress, tous ports
+      if (f.self) {
+        if (isEmpty(src)) { errs[3].push(where + ' (allow-self) : choisissez une source.'); fe.src = true; return; }
+        if (src.groups.length > 1) { errs[3].push(where + ' (allow-self) : une seule source possible, sinon les groupes pourraient communiquer entre eux.'); fe.src = true; return; }
+        if (src.any && (!net || !m.ng)) { errs[3].push(where + ' (allow-self) : « any » nécessite un Network Group et un Network valides (étape 1).'); fe.src = true; return; }
+        const peers = src.any ? [{ cidr: net.cidr }] : cidrsOf(src.groups).map(c => ({ cidr: c }));
+        if (!peers.length) { errs[3].push(where + ' (allow-self) : la source n\'a aucune IP valide.'); fe.src = true; return; }
+        const pol = { dir: 'both', self: true, target: src, src, dst: src, flow: f, idx: i + 1, peers, ports: [], apps: [] };
+        pol.name = polName(pol); pols.push(pol); fe.effects.push(pol);
+        return;
+      }
       const ports = [], apps = [];
       f.ports.forEach((p, qi) => {
         const e = portError(p);
@@ -559,7 +574,8 @@
     for (const p of A.pols) {
       const l = [];
       const desc = p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '';
-      header(l, p.name, p.dir === 'both' ? 'Flux Nord/Sud : network ' + S.meta.ng + ' ↔ extérieur + gateway'
+      header(l, p.name, p.self ? 'Flux ' + p.idx + ' : allow-self ' + sideLabel(p.src) + ' ↔ ' + sideLabel(p.src) + ' (tous ports)'
+        : p.dir === 'both' ? 'Flux Nord/Sud : network ' + S.meta.ng + ' ↔ extérieur + gateway'
         : 'Flux ' + p.idx + ' : ' + sideLabel(p.src) + ' → ' + sideLabel(p.dst) + desc);
       podSelector(l, p.target);
       l.push('  policyTypes:');
@@ -702,7 +718,7 @@
   function toggleSide(f, key, v) {
     const cur = f[key];
     if (cur.includes(v)) f[key] = cur.filter(x => x !== v);
-    else if (v === ANY) f[key] = [ANY];
+    else if (v === ANY || (f.self && key === 'src')) f[key] = [v];
     else { const keep = cur.filter(x => x !== ANY); f[key] = S.sgs.map(g => g.id).filter(id => id === v || keep.includes(id)); }
     renderSgs(); refresh();
   }
@@ -725,18 +741,21 @@
       el.className = 'item';
       el.dataset.flow = f.id;
       el.innerHTML =
-        '<div class="item-head"><strong>Flux ' + (i + 1) + '</strong><span>' +
+        '<div class="item-head"><span><strong>Flux ' + (i + 1) + '</strong>' +
+          '<label class="selfbox" title="La source communique avec elle-même, en ingress et egress, sur tous les ports"><input type="checkbox" data-self> allow-self</label></span><span>' +
           '<button type="button" class="small" data-dup title="Dupliquer">Dupliquer</button> ' +
           '<button type="button" class="danger small" data-del>Supprimer</button></span></div>' +
         '<div class="flow-line">' +
           '<div class="field"><span class="flabel">Source(s)</span><div data-pk="src"></div></div>' +
           '<span class="arrow" aria-hidden="true">→</span>' +
-          '<div class="field"><span class="flabel">Destination(s)</span><div data-pk="dst"></div></div>' +
+          '<div class="field" data-lock><span class="flabel">Destination(s)</span><div data-pk="dst"></div></div>' +
         '</div>' +
-        '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
-        '<div class="ports-title">Services</div>' +
-        '<div class="svc-bar"><div data-svc></div><button type="button" class="small" data-addport>+ Port manuel</button></div>' +
-        '<div data-ports></div>' +
+        '<div data-lock>' +
+          '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
+          '<div class="ports-title">Services</div>' +
+          '<div class="svc-bar"><div data-svc></div><button type="button" class="small" data-addport>+ Port manuel</button></div>' +
+          '<div data-ports></div>' +
+        '</div>' +
         '<div class="effect" data-effect></div>';
       ['src', 'dst'].forEach(key => {
         const slot = el.querySelector('[data-pk=' + key + ']'); if (!slot) return;
@@ -753,6 +772,10 @@
         isSel: () => false, onPick: (v) => addService(f, v),
         onRemove: (v) => { custom = custom.filter(s => s.name !== v); saveServices(); },
       }).el);
+      const selfCb = el.querySelector('[data-self]');
+      selfCb.checked = !!f.self;
+      selfCb.onchange = () => { f.self = selfCb.checked; renderFlows(); refresh(); };
+      el.querySelectorAll('[data-lock]').forEach(x => { x.inert = !!f.self; x.classList.toggle('off', !!f.self); });
       const d = el.querySelector('[data-f=desc]');
       d.value = f.desc || '';
       d.addEventListener('input', () => { f.desc = d.value; refresh(); });
@@ -870,7 +893,7 @@
     if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), ips: str(g.ips) }));
     o.ns = !!d.ns || (Array.isArray(d.flows) && d.flows.some(f => f && f.type === 'ns'));
     if (Array.isArray(d.flows)) o.flows = d.flows.filter(f => f && f.type !== 'ns').map(f => ({ id: str(f.id) || uid(),
-      src: ids(f.src), dst: ids(f.dst), desc: str(f.desc),
+      src: ids(f.src), dst: ids(f.dst), desc: str(f.desc), self: !!f.self,
       ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: PROTOS.includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
     o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
     return o;
