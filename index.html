@@ -80,7 +80,13 @@
   .empty { color: var(--muted); font-style: italic; margin: 4px 0 12px; }
 
   .flow-line { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; }
-  .flow-line .arrow { font-size: 20px; padding-bottom: 5px; color: var(--muted); }
+  .flow-line { align-items: start; }
+  .flow-line .arrow { font-size: 20px; padding-top: 26px; color: var(--muted); }
+  .flabel { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+  .picks { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); min-height: 38px; }
+  .pick { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; font-size: 13px; background: var(--panel-2); }
+  .pick:has(input:checked) { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+  .pick input { margin: 0; }
   @media (max-width: 560px) { .flow-line { grid-template-columns: 1fr; } .flow-line .arrow { display: none; } }
   .ports-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
   .row.port { display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; margin-bottom: 6px; align-items: center; }
@@ -261,13 +267,14 @@
   const fullName = (g) => (S.meta.ng ? S.meta.ng + '-' : '') + g.name;
   // Séparateur des noms d'application : « _ » est refusé par l'API Kubernetes (RFC 1123), « . » est accepté.
   const NA_SEP = '.';
+  const names = (gs) => gs.map(g => g.name).join('-');
   function polName(p) {
     const ng = S.meta.ng ? S.meta.ng + '-' : '';
     const apps = [...new Set(p.apps)];
     const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
     return p.dir === 'ingress'
-      ? ng + p.dst.name + '-ingress-from-' + p.src.name + suffix
-      : ng + p.src.name + '-egress-to-' + p.dst.name + suffix;
+      ? ng + names(p.dsts) + '-ingress-from-' + names(p.srcs) + suffix
+      : ng + names(p.srcs) + '-egress-to-' + names(p.dsts) + suffix;
   }
   const sgLabel = (g) => g ? (g.name ? fullName(g) : '(sans nom)') : '(groupe supprimé)';
 
@@ -283,7 +290,7 @@
     const names = new Set();
     S.sgs.forEach((g, i) => {
       const where = 'Groupe « ' + sgLabel(g) + ' »';
-      const info = { cidrs: [], badIps: false, labels: [[SG_LABEL, fullName(g)]], badName: false };
+      const info = { cidrs: [], badIps: false, badName: false };
       if (!g.name || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - »).'); info.badName = true; }
       else if (fullName(g).length > 63) { errs[2].push(where + ' : 63 caractères max avec le préfixe (valeur du label ' + SG_LABEL + ').'); info.badName = true; }
       else if (names.has(g.name)) { errs[2].push('Nom de groupe en double : « ' + g.name + ' ».'); info.badName = true; }
@@ -303,11 +310,11 @@
     const flowState = {};
     S.flows.forEach((f, i) => {
       const where = 'Flux ' + (i + 1);
-      const src = sgById(f.src), dst = sgById(f.dst);
+      const srcs = f.src.map(sgById).filter(Boolean), dsts = f.dst.map(sgById).filter(Boolean);
       const fe = { src: false, dst: false, ports: new Set(), effects: [] };
       flowState[f.id] = fe;
-      if (!src) { errs[3].push(where + ' : choisissez une source.'); fe.src = true; }
-      if (!dst) { errs[3].push(where + ' : choisissez une destination.'); fe.dst = true; }
+      if (!srcs.length) { errs[3].push(where + ' : choisissez au moins une source.'); fe.src = true; }
+      if (!dsts.length) { errs[3].push(where + ' : choisissez au moins une destination.'); fe.dst = true; }
       // Ports
       const ports = [], apps = [];
       f.ports.forEach((p, qi) => {
@@ -326,22 +333,23 @@
         if (bad) fe.ports.add(qi);
         else { ports.push({ protocol: p.protocol, port: p.port, endPort: p.endPort && p.endPort !== p.port ? p.endPort : '', app: p.app }); if (p.app) apps.push(p.app); }
       });
-      if (!src || !dst) return;
-      if (!ports.length) warns.push(where + ' (' + sgLabel(src) + ' → ' + sgLabel(dst) + ') : aucun port, tous les ports et protocoles sont autorisés.');
-      {
-        const peers = sgInfo[src.id].cidrs;
-        if (!peers.length) { errs[3].push(where + ' : la source « ' + sgLabel(src) + ' » n\'a aucune IP, impossible d\'écrire la règle ingress.'); fe.src = true; }
-        else { const pol = { dir: 'ingress', sg: dst, src, dst, flow: f, idx: i + 1, peers, ports, apps }; pol.name = polName(pol); pols.push(pol); fe.effects.push(pol); }
-      }
-      {
-        const peers = sgInfo[dst.id].cidrs;
-        if (!peers.length) { errs[3].push(where + ' : la destination « ' + sgLabel(dst) + ' » n\'a aucune IP, impossible d\'écrire la règle egress.'); fe.dst = true; }
-        else { const pol = { dir: 'egress', sg: src, src, dst, flow: f, idx: i + 1, peers, ports, apps }; pol.name = polName(pol); pols.push(pol); fe.effects.push(pol); }
-      }
+      if (!srcs.length || !dsts.length) return;
+      const list = (gs) => gs.map(sgLabel).join(', ');
+      if (!ports.length) warns.push(where + ' (' + list(srcs) + ' → ' + list(dsts) + ') : aucun port, tous les ports et protocoles sont autorisés.');
+      const cidrsOf = (gs) => [...new Set(gs.flatMap(g => sgInfo[g.id].cidrs))];
+      const mk = (dir, targets, peers) => {
+        const pol = { dir, targets, srcs, dsts, flow: f, idx: i + 1, peers, ports, apps };
+        pol.name = polName(pol); pols.push(pol); fe.effects.push(pol);
+      };
+      const srcIps = cidrsOf(srcs), dstIps = cidrsOf(dsts);
+      if (!srcIps.length) { errs[3].push(where + ' : les sources n\'ont aucune IP valide, impossible d\'écrire la règle ingress.'); fe.src = true; }
+      else mk('ingress', dsts, srcIps);
+      if (!dstIps.length) { errs[3].push(where + ' : les destinations n\'ont aucune IP valide, impossible d\'écrire la règle egress.'); fe.dst = true; }
+      else mk('egress', srcs, dstIps);
     });
 
     S.sgs.forEach(g => {
-      if (!S.flows.some(f => f.src === g.id || f.dst === g.id))
+      if (!S.flows.some(f => f.src.includes(g.id) || f.dst.includes(g.id)))
         warns.push('Le groupe « ' + sgLabel(g) + ' » n\'est utilisé dans aucun flux.');
     });
 
@@ -373,11 +381,13 @@
     L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(S.meta.namespace + '/' + S.meta.nadName));
     L.push('spec:');
   }
-  function podSelector(L, labels) {
-    if (!labels.length) { L.push('  podSelector: {}'); return; }
+  function podSelector(L, groups) {
     L.push('  podSelector:');
-    L.push('    matchLabels:');
-    labels.forEach(([k, v]) => L.push('      ' + q(k) + ': ' + JSON.stringify(v)));
+    L.push('    matchExpressions:');
+    L.push('      - key: ' + SG_LABEL);
+    L.push('        operator: In');
+    L.push('        values:');
+    groups.forEach(g => L.push('          - ' + fullName(g)));
   }
   const oneLine = (s) => s.replace(/[\r\n]+/g, ' ');
 
@@ -386,8 +396,8 @@
     const push = (name, kind, target, rules, lines) => objs.push({ name, kind, target, rules, text: lines.join('\n') + '\n' });
     for (const p of A.pols) {
       const l = [], kw = p.dir === 'ingress' ? 'from' : 'to';
-      header(l, p.name, ['Flux ' + p.idx + ' : ' + fullName(p.src) + ' → ' + fullName(p.dst) + (p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '')]);
-      podSelector(l, A.sgInfo[p.sg.id].labels);
+      header(l, p.name, ['Flux ' + p.idx + ' : ' + p.srcs.map(fullName).join(', ') + ' → ' + p.dsts.map(fullName).join(', ') + (p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '')]);
+      podSelector(l, p.targets);
       l.push('  policyTypes:');
       l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
       l.push('  ' + p.dir + ':');
@@ -402,7 +412,7 @@
           if (pt.endPort) l.push('          endPort: ' + pt.endPort);
         });
       }
-      push(p.name, p.dir, A.sgInfo[p.sg.id].labels.map(([k, v]) => k + '=' + v).join(', '), p.idx, l);
+      push(p.name, p.dir, SG_LABEL + ' in (' + p.targets.map(fullName).join(', ') + ')', p.idx, l);
     }
     return objs;
   }
@@ -428,16 +438,13 @@
     if (!S.sgs.length) { host.innerHTML = '<p class="empty">Aucun security group. Ajoutez-en au moins deux pour pouvoir définir un flux.</p>'; return; }
     host.innerHTML = '';
     S.sgs.forEach((g, i) => {
-      const used = S.flows.filter(f => f.src === g.id || f.dst === g.id).length;
+      const used = S.flows.filter(f => f.src.includes(g.id) || f.dst.includes(g.id)).length;
       const el = document.createElement('div');
       el.className = 'item';
       el.innerHTML =
         '<div class="item-head"><strong>Groupe ' + (i + 1) + (used ? ' <span class="hint">· utilisé dans ' + used + ' flux</span>' : '') + '</strong>' +
         '<button type="button" class="danger small" data-del>Supprimer</button></div>' +
-        '<div class="grid2">' +
-          '<label class="field"><span>Nom du groupe</span><span class="prefixed"><span class="pfx" data-pfx></span><input type="text" data-f="name" spellcheck="false" placeholder="ex. front"></span></label>' +
-          '<label class="field"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel"></label>' +
-        '</div>' +
+        '<label class="field"><span>Nom du groupe</span><span class="prefixed"><span class="pfx" data-pfx></span><input type="text" data-f="name" spellcheck="false" placeholder="ex. front"></span></label>' +
         '<label class="field" style="margin-top:10px"><span>IP / réseaux</span>' +
           '<textarea data-f="ips" rows="3" spellcheck="false" placeholder="10.235.10.12&#10;10.235.10.13&#10;10.235.20.0/24"></textarea>' +
           '<div class="hint">Une entrée par ligne (ou séparées par virgule). IP seule = /32. Ce sont les IP utilisées quand le groupe est l\'autre extrémité d\'un flux.</div></label>' +
@@ -454,8 +461,8 @@
         });
       });
       el.querySelector('[data-del]').onclick = () => {
-        if (used && !confirm('Ce groupe est utilisé dans ' + used + ' flux. Supprimer quand même ? Les flux concernés seront aussi supprimés.')) return;
-        S.flows = S.flows.filter(f => f.src !== g.id && f.dst !== g.id);
+        if (used && !confirm('Ce groupe est utilisé dans ' + used + ' flux. Supprimer quand même ? Il sera retiré de ces flux.')) return;
+        S.flows.forEach(f => { f.src = f.src.filter(x => x !== g.id); f.dst = f.dst.filter(x => x !== g.id); });
         S.sgs.splice(i, 1); renderSgs(); renderFlows(); refresh();
       };
       el.dataset.sg = g.id;
@@ -463,9 +470,10 @@
     });
   }
 
-  function sgOptions(sel) {
-    return '<option value="">— choisir —</option>' + S.sgs.map(g =>
-      '<option value="' + g.id + '"' + (g.id === sel ? ' selected' : '') + '>' + esc(sgLabel(g)) + '</option>').join('');
+  function sgPicks(side, sel) {
+    if (!S.sgs.length) return '<span class="hint">Aucun security group.</span>';
+    return S.sgs.map(g => '<label class="pick"><input type="checkbox" data-side="' + side + '" value="' + g.id + '"' +
+      (sel.includes(g.id) ? ' checked' : '') + '><span>' + esc(sgLabel(g)) + '</span></label>').join('');
   }
   function renderFlows() {
     const host = $('flowList');
@@ -480,9 +488,9 @@
           '<button type="button" class="small" data-dup title="Dupliquer">Dupliquer</button> ' +
           '<button type="button" class="danger small" data-del>Supprimer</button></span></div>' +
         '<div class="flow-line">' +
-          '<label class="field"><span>Source</span><select data-f="src">' + sgOptions(f.src) + '</select></label>' +
+          '<div class="field"><span class="flabel">Source(s)</span><div class="picks" data-picks="src">' + sgPicks('src', f.src) + '</div></div>' +
           '<span class="arrow" aria-hidden="true">→</span>' +
-          '<label class="field"><span>Destination</span><select data-f="dst">' + sgOptions(f.dst) + '</select></label>' +
+          '<div class="field"><span class="flabel">Destination(s)</span><div class="picks" data-picks="dst">' + sgPicks('dst', f.dst) + '</div></div>' +
         '</div>' +
         '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
         '<div class="ports-title">Ports et applications</div><div data-ports></div>' +
@@ -490,9 +498,15 @@
         '<div class="effect" data-effect></div>';
       el.querySelectorAll('[data-f]').forEach(inp => {
         const k = inp.dataset.f;
-        if (inp.tagName !== 'SELECT') inp.value = f[k] || '';
-        inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => { f[k] = inp.value; refresh(); });
+        inp.value = f[k] || '';
+        inp.addEventListener('input', () => { f[k] = inp.value; refresh(); });
       });
+      el.querySelectorAll('[data-side]').forEach(cb => cb.addEventListener('change', () => {
+        const side = cb.dataset.side;
+        // garde l'ordre des security groups
+        f[side] = S.sgs.map(g => g.id).filter(id => id === cb.value ? cb.checked : f[side].includes(id));
+        renderSgs(); refresh();
+      }));
       const ph = el.querySelector('[data-ports]');
       if (!f.ports.length) ph.innerHTML = '<p class="empty" style="margin:0 0 6px">Aucun port : tous les ports et protocoles.</p>';
       f.ports.forEach((p, qi) => {
@@ -544,8 +558,8 @@
     // Étape 3 : marquage + effet
     document.querySelectorAll('#flowList [data-flow]').forEach(el => {
       const fs = A.flowState[el.dataset.flow]; if (!fs) return;
-      el.querySelector('[data-f=src]').classList.toggle('invalid', fs.src);
-      el.querySelector('[data-f=dst]').classList.toggle('invalid', fs.dst);
+      el.querySelector('[data-picks=src]').classList.toggle('invalid', fs.src);
+      el.querySelector('[data-picks=dst]').classList.toggle('invalid', fs.dst);
       el.querySelectorAll('[data-port]').forEach(inp => inp.classList.toggle('invalid', fs.ports.has(+inp.dataset.port)));
       el.querySelector('[data-effect]').innerHTML = fs.effects.length
         ? 'Génère : ' + fs.effects.map(p => '<span class="tag ' + (p.dir === 'ingress' ? 'in' : 'out') + '">' + p.dir + '</span> <code>' + esc(p.name) + '</code>').join(' ')
@@ -590,9 +604,10 @@
     const o = blank();
     if (!d || typeof d !== 'object') return o;
     const str = (v) => typeof v === 'string' ? v : '';
+    const ids = (v) => Array.isArray(v) ? v.filter(x => typeof x === 'string') : (typeof v === 'string' && v ? [v] : []);
     if (d.meta) { META.forEach(k => o.meta[k] = str(d.meta[k])); }
-    if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), desc: str(g.desc), ips: str(g.ips) }));
-    if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), src: str(f.src), dst: str(f.dst), desc: str(f.desc),
+    if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), ips: str(g.ips) }));
+    if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), src: ids(f.src), dst: ids(f.dst), desc: str(f.desc),
       ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: ['TCP', 'UDP', 'SCTP'].includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
     o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
     return o;
@@ -604,12 +619,12 @@
   document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => goStep(+b.dataset.step));
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goStep(+b.dataset.go));
   $('addSg').onclick = () => {
-    S.sgs.push({ id: uid(), name: '', desc: '', ips: '' });
+    S.sgs.push({ id: uid(), name: '', ips: '' });
     renderSgs(); renderFlows(); refresh();
     const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
   };
   $('addFlow').onclick = () => {
-    S.flows.push({ id: uid(), src: '', dst: '', desc: '', ports: [{ protocol: 'TCP', port: '', endPort: '', app: '' }] });
+    S.flows.push({ id: uid(), src: [], dst: [], desc: '', ports: [{ protocol: 'TCP', port: '', endPort: '', app: '' }] });
     renderFlows(); refresh();
   };
   function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
