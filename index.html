@@ -107,6 +107,7 @@
     border-radius: 6px 0 0 6px; background: var(--panel); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prefixed .pfx:empty { display: none; }
   .prefixed .pfx:not(:empty) + input { border-radius: 0 6px 6px 0; }
+  code.selector { display: block; padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -153,7 +154,7 @@
   <p class="hint" id="annotPreview"></p>
   <label class="chk" style="margin-top:12px"><input type="checkbox" id="m_defaultDeny">
     <span>Générer aussi les politiques « deny all » (ingress et egress) pour tous les pods du namespace sur cette NAD
-    <span class="hint" style="display:block;font-weight:400">Sans elles, seuls les pods des groupes internes ciblés par un flux sont filtrés ; les autres pods restent ouverts.</span></span></label>
+    <span class="hint" style="display:block;font-weight:400">Sans elles, seuls les pods des groupes utilisés dans un flux sont filtrés ; les autres pods restent ouverts.</span></span></label>
   <ul class="msgs err" id="err1" style="margin-top:12px"></ul>
   <div class="navbtns"><span></span><button type="button" class="primary" data-go="2">Suivant : security groups →</button></div>
 </section>
@@ -161,8 +162,8 @@
 <!-- ÉTAPE 2 -->
 <section class="card" data-panel="2" hidden>
   <h2>2. Security groups</h2>
-  <p class="lead">Un groupe = une ou plusieurs IP / réseaux. Cochez « interne » si le groupe représente des pods du namespace
-    <code id="nsRef"></code> : c'est sur eux que les règles seront posées.</p>
+  <p class="lead">Un groupe = une ou plusieurs IP / réseaux. Les pods du namespace <code id="nsRef"></code> sont rattachés à un groupe
+    par le label <code>neos/vm.dfw-sg</code>, sur lequel les règles sont posées.</p>
   <div id="sgList"></div>
   <ul class="msgs err" id="err2"></ul>
   <div class="navbtns">
@@ -193,7 +194,7 @@
 <!-- ÉTAPE 4 -->
 <section class="card" data-panel="4" hidden>
   <h2>4. YAML généré</h2>
-  <p class="lead">Un objet par groupe interne et par sens : jamais d'ingress et d'egress dans la même MultiNetworkPolicy.</p>
+  <p class="lead">Un objet par security group et par sens : jamais d'ingress et d'egress dans la même MultiNetworkPolicy.</p>
   <ul class="msgs err" id="err4"></ul>
   <ul class="msgs warn" id="warn4"></ul>
   <div class="table-wrap"><table id="polTable"></table></div>
@@ -258,19 +259,7 @@
     return { ok: false, msg: 'adresse IP invalide' };
   }
   const splitList = (txt) => txt.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
-  function parseLabels(txt) {
-    const out = [], errs = [];
-    for (const line of txt.split('\n')) {
-      const l = line.trim(); if (!l) continue;
-      const i = l.indexOf('=');
-      if (i < 1) { errs.push('« ' + l + ' » : format clé=valeur attendu'); continue; }
-      const k = l.slice(0, i).trim(), v = l.slice(i + 1).trim();
-      if (!LABEL_KEY.test(k)) errs.push('clé de label « ' + k + ' » invalide');
-      else if (v.length > 63 || !LABEL_VAL.test(v)) errs.push('valeur de label « ' + v + ' » invalide');
-      else out.push([k, v]);
-    }
-    return { labels: out, errs };
-  }
+  const SG_LABEL = 'neos/vm.dfw-sg';
   const sgById = (id) => S.sgs.find(g => g.id === id);
   const fullName = (g) => (S.meta.ng ? S.meta.ng + '-' : '') + g.name;
   const sgLabel = (g) => g ? (g.name ? fullName(g) : '(sans nom)') : '(groupe supprimé)';
@@ -287,8 +276,9 @@
     const names = new Set();
     S.sgs.forEach((g, i) => {
       const where = 'Groupe « ' + sgLabel(g) + ' »';
-      const info = { cidrs: [], badIps: false, labels: [], badLabels: false, badName: false };
-      if (!g.name || fullName(g).length > 200 || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - »).'); info.badName = true; }
+      const info = { cidrs: [], badIps: false, labels: [[SG_LABEL, fullName(g)]], badName: false };
+      if (!g.name || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - »).'); info.badName = true; }
+      else if (fullName(g).length > 63) { errs[2].push(where + ' : 63 caractères max avec le préfixe (valeur du label ' + SG_LABEL + ').'); info.badName = true; }
       else if (names.has(g.name)) { errs[2].push('Nom de groupe en double : « ' + g.name + ' ».'); info.badName = true; }
       names.add(g.name);
       const seen = new Set();
@@ -297,18 +287,11 @@
         if (!r.ok) { errs[2].push(where + ' : « ' + raw + ' » — ' + r.msg + '.'); info.badIps = true; }
         else if (!seen.has(r.cidr)) { seen.add(r.cidr); info.cidrs.push(r.cidr); }
       }
-      if (g.internal) {
-        const pl = parseLabels(g.labels);
-        pl.errs.forEach(e => errs[2].push(where + ' : ' + e + '.'));
-        info.badLabels = pl.errs.length > 0;
-        info.labels = pl.labels;
-      } else if (!info.cidrs.length && !info.badIps) {
-        errs[2].push(where + ' : un groupe externe doit contenir au moins une IP.'); info.badIps = true;
-      }
+      if (!info.cidrs.length && !info.badIps) { errs[2].push(where + ' : au moins une IP est requise.'); info.badIps = true; }
       sgInfo[g.id] = info;
     });
 
-    // Politiques : clé = sens + groupe interne ciblé
+    // Politiques : clé = sens + security group ciblé
     const pols = new Map();
     const getPol = (dir, g) => {
       const key = dir + '|' + g.id;
@@ -341,34 +324,22 @@
       });
       if (!src || !dst) return;
       if (!ports.length) warns.push(where + ' (' + sgLabel(src) + ' → ' + sgLabel(dst) + ') : aucun port, tous les ports et protocoles sont autorisés.');
-      if (!src.internal && !dst.internal) {
-        errs[3].push(where + ' : au moins la source ou la destination doit être un groupe interne (pods du namespace), sinon aucune MultiNetworkPolicy ne peut filtrer ce flux.');
-        fe.src = fe.dst = true; return;
-      }
-      if (dst.internal) {
+      {
         const peers = sgInfo[src.id].cidrs;
         if (!peers.length) { errs[3].push(where + ' : la source « ' + sgLabel(src) + ' » n\'a aucune IP, impossible d\'écrire la règle ingress.'); fe.src = true; }
         else { getPol('ingress', dst).rules.push({ flow: f, idx: i + 1, src, dst, peers, ports }); fe.effects.push(['in', dst]); }
       }
-      if (src.internal) {
+      {
         const peers = sgInfo[dst.id].cidrs;
         if (!peers.length) { errs[3].push(where + ' : la destination « ' + sgLabel(dst) + ' » n\'a aucune IP, impossible d\'écrire la règle egress.'); fe.dst = true; }
         else { getPol('egress', src).rules.push({ flow: f, idx: i + 1, src, dst, peers, ports }); fe.effects.push(['out', src]); }
       }
     });
 
-    // Pods internes sans règle dans un sens : avertissement
-    S.sgs.filter(g => g.internal).forEach(g => {
+    S.sgs.forEach(g => {
       if (!S.flows.some(f => f.src === g.id || f.dst === g.id))
-        warns.push('Le groupe interne « ' + sgLabel(g) + ' » n\'est utilisé dans aucun flux.');
+        warns.push('Le groupe « ' + sgLabel(g) + ' » n\'est utilisé dans aucun flux.');
     });
-    const internals = S.sgs.filter(g => g.internal);
-    for (let a = 0; a < internals.length; a++) for (let b = a + 1; b < internals.length; b++) {
-      const la = sgInfo[internals[a].id].labels, lb = sgInfo[internals[b].id].labels;
-      const sub = (x, y) => x.every(([k, v]) => y.some(([k2, v2]) => k === k2 && v === v2));
-      if (sub(la, lb) || sub(lb, la))
-        warns.push('Les groupes internes « ' + sgLabel(internals[a]) + ' » et « ' + sgLabel(internals[b]) + ' » sélectionnent (au moins en partie) les mêmes pods : leurs règles se cumulent sur ces pods.');
-    }
 
     const list = [...pols.values()].sort((x, y) => (x.sg.name || '').localeCompare(y.sg.name || '') || x.dir.localeCompare(y.dir));
     return { errs, warns, pols: list, sgInfo, flowState };
@@ -413,7 +384,7 @@
     }
     for (const p of A.pols) {
       const l = [], n = polName(p), kw = p.dir === 'ingress' ? 'from' : 'to';
-      header(l, n, ['Groupe interne : ' + fullName(p.sg) + ' — ' + (p.dir === 'ingress' ? 'flux entrants' : 'flux sortants')]);
+      header(l, n, ['Security group : ' + fullName(p.sg) + ' — ' + (p.dir === 'ingress' ? 'flux entrants' : 'flux sortants')]);
       podSelector(l, A.sgInfo[p.sg.id].labels);
       l.push('  policyTypes:');
       l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
@@ -432,7 +403,7 @@
         }
       }
       const labels = A.sgInfo[p.sg.id].labels;
-      push(n, p.dir, labels.length ? labels.map(([k, v]) => k + '=' + v).join(', ') : 'tous les pods', p.rules.length, l);
+      push(n, p.dir, labels.map(([k, v]) => k + '=' + v).join(', '), p.rules.length, l);
     }
     return objs;
   }
@@ -456,15 +427,14 @@
 
   function renderSgs() {
     const host = $('sgList');
-    if (!S.sgs.length) { host.innerHTML = '<p class="empty">Aucun security group. Ajoutez-en au moins un groupe interne (vos pods) et un groupe pour l\'autre extrémité.</p>'; return; }
+    if (!S.sgs.length) { host.innerHTML = '<p class="empty">Aucun security group. Ajoutez-en au moins deux pour pouvoir définir un flux.</p>'; return; }
     host.innerHTML = '';
     S.sgs.forEach((g, i) => {
       const used = S.flows.filter(f => f.src === g.id || f.dst === g.id).length;
       const el = document.createElement('div');
       el.className = 'item';
       el.innerHTML =
-        '<div class="item-head"><strong>Groupe ' + (i + 1) + ' <span class="tag ' + (g.internal ? 'in' : 'ext') + '">' + (g.internal ? 'interne' : 'externe') + '</span>' +
-        (used ? ' <span class="hint">· utilisé dans ' + used + ' flux</span>' : '') + '</strong>' +
+        '<div class="item-head"><strong>Groupe ' + (i + 1) + (used ? ' <span class="hint">· utilisé dans ' + used + ' flux</span>' : '') + '</strong>' +
         '<button type="button" class="danger small" data-del>Supprimer</button></div>' +
         '<div class="grid2">' +
           '<label class="field"><span>Nom du groupe</span><span class="prefixed"><span class="pfx" data-pfx></span><input type="text" data-f="name" spellcheck="false" placeholder="ex. front"></span></label>' +
@@ -472,22 +442,19 @@
         '</div>' +
         '<label class="field" style="margin-top:10px"><span>IP / réseaux</span>' +
           '<textarea data-f="ips" rows="3" spellcheck="false" placeholder="10.235.10.12&#10;10.235.10.13&#10;10.235.20.0/24"></textarea>' +
-          '<div class="hint">Une entrée par ligne (ou séparées par virgule). IP seule = /32. Pour un groupe interne, ce sont les IP des pods sur la NAD (utilisées quand le groupe est l\'extrémité distante d\'un flux).</div></label>' +
-        '<label class="chk" style="margin-top:10px"><input type="checkbox" data-f="internal"><span>Groupe interne : pods du namespace à protéger</span></label>' +
-        '<label class="field" data-labels style="margin-top:8px"><span>Labels des pods (podSelector)</span>' +
-          '<textarea data-f="labels" rows="2" spellcheck="false" placeholder="app=front"></textarea>' +
-          '<div class="hint">Une ligne <code>clé=valeur</code>. Vide = tous les pods du namespace attachés à la NAD. Une MultiNetworkPolicy ne peut pas cibler des pods par IP, d\'où ces labels.</div></label>';
+          '<div class="hint">Une entrée par ligne (ou séparées par virgule). IP seule = /32. Ce sont les IP utilisées quand le groupe est l\'autre extrémité d\'un flux.</div></label>' +
+        '<div class="field" style="margin-top:10px"><span style="display:block;font-weight:600;margin-bottom:4px;font-size:13px">podSelector</span>' +
+          '<code class="selector" data-sel></code>' +
+          '<div class="hint">Les pods (VM) de ce groupe doivent porter ce label.</div></div>';
       el.querySelectorAll('[data-f]').forEach(inp => {
         const f = inp.dataset.f;
         if (inp.type === 'checkbox') inp.checked = !!g[f]; else inp.value = g[f] || '';
         inp.addEventListener(inp.type === 'checkbox' ? 'change' : 'input', () => {
           g[f] = inp.type === 'checkbox' ? inp.checked : inp.value;
-          if (f === 'internal') { renderSgs(); }
-          if (f === 'name' || f === 'internal') renderFlows();
+          if (f === 'name') renderFlows();
           refresh();
         });
       });
-      el.querySelector('[data-labels]').hidden = !g.internal;
       el.querySelector('[data-del]').onclick = () => {
         if (used && !confirm('Ce groupe est utilisé dans ' + used + ' flux. Supprimer quand même ? Les flux concernés seront aussi supprimés.')) return;
         S.flows = S.flows.filter(f => f.src !== g.id && f.dst !== g.id);
@@ -500,7 +467,7 @@
 
   function sgOptions(sel) {
     return '<option value="">— choisir —</option>' + S.sgs.map(g =>
-      '<option value="' + g.id + '"' + (g.id === sel ? ' selected' : '') + '>' + esc(sgLabel(g)) + (g.internal ? ' (interne)' : '') + '</option>').join('');
+      '<option value="' + g.id + '"' + (g.id === sel ? ' selected' : '') + '>' + esc(sgLabel(g)) + '</option>').join('');
   }
   function renderFlows() {
     const host = $('flowList');
@@ -572,7 +539,7 @@
       el.querySelector('[data-pfx]').textContent = S.meta.ng ? S.meta.ng + '-' : '';
       el.querySelector('[data-f=name]').classList.toggle('invalid', info.badName);
       el.querySelector('[data-f=ips]').classList.toggle('invalid', info.badIps);
-      el.querySelector('[data-f=labels]').classList.toggle('invalid', info.badLabels);
+      const g = sgById(el.dataset.sg); el.querySelector('[data-sel]').textContent = SG_LABEL + ': ' + (g && g.name ? fullName(g) : '…');
     });
     // Étape 3 : marquage + effet
     document.querySelectorAll('#flowList [data-flow]').forEach(el => {
@@ -588,7 +555,7 @@
     showErr('err1', A.errs[1]); showErr('err2', A.errs[2]); showErr('err3', A.errs[3]);
     // Étape 4
     const allErr = [...A.errs[1], ...A.errs[2], ...A.errs[3]];
-    if (!A.pols.length && !allErr.length) allErr.push('Aucune règle à générer : ajoutez au moins un flux impliquant un groupe interne.');
+    if (!A.pols.length && !allErr.length) allErr.push('Aucune règle à générer : ajoutez au moins un flux.');
     showErr('err4', allErr.length ? ['Corrigez ces points avant d\'appliquer le YAML :', ...allErr] : []);
     showErr('warn4', A.warns);
     objs = buildYaml(A);
@@ -624,7 +591,7 @@
     if (!d || typeof d !== 'object') return o;
     const str = (v) => typeof v === 'string' ? v : '';
     if (d.meta) { META.forEach(k => o.meta[k] = str(d.meta[k])); o.meta.defaultDeny = !!d.meta.defaultDeny; }
-    if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), desc: str(g.desc), ips: str(g.ips), internal: !!g.internal, labels: str(g.labels) }));
+    if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), desc: str(g.desc), ips: str(g.ips) }));
     if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), src: str(f.src), dst: str(f.dst), desc: str(f.desc),
       ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: ['TCP', 'UDP', 'SCTP'].includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort) })) : [] }));
     o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
@@ -638,7 +605,7 @@
   document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => goStep(+b.dataset.step));
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goStep(+b.dataset.go));
   $('addSg').onclick = () => {
-    S.sgs.push({ id: uid(), name: '', desc: '', ips: '', internal: !S.sgs.some(g => g.internal), labels: '' });
+    S.sgs.push({ id: uid(), name: '', desc: '', ips: '' });
     renderSgs(); renderFlows(); refresh();
     const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
   };
