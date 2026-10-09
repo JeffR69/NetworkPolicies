@@ -3,44 +3,57 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Générateur MultiNetworkPolicy</title>
+<title>Firewall MultiNetworkPolicy</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1d2330; --muted: #5d6677;
     --border: #d6dbe3; --accent: #c4161c; --accent-text: #ffffff; --focus: #2563eb;
-    --error: #b42318; --error-bg: #fdecea; --ok: #067647;
-    --code-bg: #12161f; --code-text: #e6e9ef; --key: #7cc4fa; --str: #b5e48c; --num: #f9c74f;
+    --error: #b42318; --error-bg: #fdecea; --warn: #8a5a00; --warn-bg: #fff4dc; --ok: #067647; --ok-bg: #e7f6ec;
+    --code-bg: #12161f; --code-text: #e6e9ef; --key: #7cc4fa; --str: #b5e48c; --num: #f9c74f; --cmt: #8b93a3;
+    --in: #1d4ed8; --out: #9333ea;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0f1218; --panel: #171b23; --panel-2: #1e232d; --text: #e6e9ef; --muted: #9aa3b2;
-      --border: #2c3340; --accent: #ef4444; --accent-text: #ffffff; --focus: #60a5fa;
-      --error: #f97066; --error-bg: #3a1714; --ok: #47cd89;
-      --code-bg: #0a0d12;
+      --border: #2c3340; --accent: #ef4444; --focus: #60a5fa;
+      --error: #f97066; --error-bg: #3a1714; --warn: #fbbf24; --warn-bg: #3a2c0a; --ok: #47cd89; --ok-bg: #0f2e1d;
+      --code-bg: #0a0d12; --in: #60a5fa; --out: #c084fc;
     }
   }
   :root[data-theme="dark"] {
     --bg: #0f1218; --panel: #171b23; --panel-2: #1e232d; --text: #e6e9ef; --muted: #9aa3b2;
-    --border: #2c3340; --accent: #ef4444; --accent-text: #ffffff; --focus: #60a5fa;
-    --error: #f97066; --error-bg: #3a1714; --ok: #47cd89;
-    --code-bg: #0a0d12;
+    --border: #2c3340; --accent: #ef4444; --focus: #60a5fa;
+    --error: #f97066; --error-bg: #3a1714; --warn: #fbbf24; --warn-bg: #3a2c0a; --ok: #47cd89; --ok-bg: #0f2e1d;
+    --code-bg: #0a0d12; --in: #60a5fa; --out: #c084fc;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { padding: 20px 16px 8px; max-width: 1400px; margin: 0 auto; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; overflow-wrap: anywhere; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+  header { padding: 20px 0 12px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   header p { margin: 0; color: var(--muted); }
-  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
-    padding: 16px; max-width: 1400px; margin: 0 auto; align-items: start; }
-  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
-  code { overflow-wrap: anywhere; }
-  section.card h2 { flex-wrap: wrap; }
-  section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 16px; margin-bottom: 16px; }
-  section.card h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  nav.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0 16px; }
+  nav.steps button { text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel); display: flex; gap: 10px; align-items: center; min-width: 0; }
+  nav.steps button .num { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--panel-2); font-weight: 700; }
+  nav.steps button .lbl { min-width: 0; }
+  nav.steps button .lbl b { display: block; font-size: 13px; }
+  nav.steps button .lbl small { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  nav.steps button[aria-current="step"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  nav.steps button[aria-current="step"] .num { background: var(--accent); color: var(--accent-text); }
+  nav.steps button.has-err .num { background: var(--error-bg); color: var(--error); }
+  @media (max-width: 640px) { nav.steps button .lbl small { display: none; } nav.steps button { padding: 8px; gap: 6px; } }
+
+  section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  section.card > h2 { font-size: 16px; margin: 0 0 4px; }
+  section.card > p.lead { margin: 0 0 14px; color: var(--muted); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
   label.field { display: block; }
   label.field > span { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -49,468 +62,627 @@
     background: var(--panel); color: var(--text); font: inherit; }
   textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; resize: vertical; }
   input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  input.invalid { border-color: var(--error); background: var(--error-bg); }
-  .toggles { display: flex; gap: 16px; flex-wrap: wrap; }
-  .toggles label { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+  .invalid { border-color: var(--error) !important; background: var(--error-bg) !important; }
   button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--border);
     background: var(--panel-2); color: var(--text); padding: 6px 12px; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
-  button.link { border: none; background: none; color: var(--error); padding: 4px 6px; }
+  button.danger { border: none; background: none; color: var(--error); padding: 4px 6px; }
   button.small { padding: 3px 9px; font-size: 13px; }
-  .rule { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: var(--panel-2); }
-  .rule-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .rule-head strong { font-size: 13px; }
-  .sub { margin-top: 10px; }
-  .sub-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 6px; }
-  .row { display: grid; gap: 8px; align-items: center; margin-bottom: 6px; }
-  .row.ip { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) auto; }
-  .row.port { grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr) auto; }
-  @media (max-width: 520px) {
-    .row.ip { grid-template-columns: 1fr auto; }
-    .row.ip > :nth-child(2) { grid-column: 1; grid-row: 2; }
-    .row.port { grid-template-columns: 1fr 1fr auto; }
-    .row.port > :nth-child(1) { grid-column: 1 / -1; }
-  }
-  .empty-note { font-size: 12px; color: var(--muted); font-style: italic; margin: 2px 0 6px; }
-  .disabled { opacity: .45; pointer-events: none; }
-  .output { position: sticky; top: 16px; }
-  pre#yaml { background: var(--code-bg); color: var(--code-text); padding: 14px; border-radius: 8px;
-    overflow: auto; margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    min-height: 200px; max-height: 70vh; white-space: pre; }
-  pre#yaml .k { color: var(--key); } pre#yaml .s { color: var(--str); } pre#yaml .n { color: var(--num); }
+  .navbtns { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; }
+
+  .item { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: var(--panel-2); }
+  .item-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .item-head strong { font-size: 13px; }
+  .chk { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .chk input { margin-top: 3px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; }
+  .tag.in { color: var(--in); } .tag.out { color: var(--out); } .tag.ext { color: var(--muted); }
+  .empty { color: var(--muted); font-style: italic; margin: 4px 0 12px; }
+
+  .flow-line { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; }
+  .flow-line .arrow { font-size: 20px; padding-bottom: 5px; color: var(--muted); }
+  @media (max-width: 560px) { .flow-line { grid-template-columns: 1fr; } .flow-line .arrow { display: none; } }
+  .ports-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
+  .row.port { display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; margin-bottom: 6px; align-items: center; }
+  @media (max-width: 560px) { .row.port { grid-template-columns: 1fr 1fr auto; } .row.port > :first-child { grid-column: 1 / -1; } }
+  .effect { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+  ul.msgs { margin: 0 0 12px; padding: 10px 10px 10px 28px; border-radius: 6px; font-size: 13px; }
+  ul.msgs.err { background: var(--error-bg); color: var(--error); }
+  ul.msgs.warn { background: var(--warn-bg); color: var(--warn); }
+  ul.msgs:empty { display: none; }
+  .okbox { background: var(--ok-bg); color: var(--ok); padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+
+  .table-wrap { overflow-x: auto; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
   .actions { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
   .status { font-size: 12px; color: var(--ok); }
-  ul#errors { margin: 10px 0 0; padding: 10px 10px 10px 28px; border-radius: 6px; background: var(--error-bg); color: var(--error); font-size: 13px; }
-  ul#errors:empty { display: none; }
-  .theme-toggle { float: right; }
+  pre#yaml { background: var(--code-bg); color: var(--code-text); padding: 14px; border-radius: 8px; overflow: auto;
+    margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-height: 75vh; white-space: pre; }
+  pre#yaml .k { color: var(--key); } pre#yaml .s { color: var(--str); } pre#yaml .n { color: var(--num); } pre#yaml .c { color: var(--cmt); font-style: italic; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
+<div class="wrap">
 <header>
-  <button class="theme-toggle small" id="themeBtn" type="button" title="Changer de thème">◐ Thème</button>
-  <h1>Générateur de MultiNetworkPolicy</h1>
-  <p>Règles de firewall distribué OpenShift (<code>k8s.cni.cncf.io/v1beta1</code>) — le YAML se met à jour en direct.</p>
+  <div>
+    <h1>Firewall distribué — MultiNetworkPolicy</h1>
+    <p>Définissez le contexte, les security groups et les flux : les objets YAML sont générés à la fin.</p>
+  </div>
+  <div class="tools">
+    <button type="button" class="small" id="exportBtn" title="Sauvegarder la saisie dans un fichier JSON">Exporter projet</button>
+    <button type="button" class="small" id="importBtn" title="Recharger un fichier JSON exporté">Importer projet</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <button type="button" class="small" id="resetBtn">Nouveau</button>
+    <button type="button" class="small" id="themeBtn" title="Changer de thème">◐</button>
+  </div>
 </header>
 
-<main>
-  <div>
-    <section class="card">
-      <h2>Métadonnées</h2>
-      <div class="grid2">
-        <label class="field"><span>Nom de la règle</span>
-          <input type="text" id="name" value="policy-emerald-angelfish" spellcheck="false">
-          <div class="hint">Minuscules, chiffres, « - » (DNS-1123, 253 car. max)</div>
-        </label>
-        <label class="field"><span>Namespace</span>
-          <input type="text" id="namespace" value="dc-sofia-dev" spellcheck="false">
-        </label>
-      </div>
-    </section>
+<nav class="steps" aria-label="Étapes">
+  <button type="button" data-step="1"><span class="num">1</span><span class="lbl"><b>Contexte</b><small>Namespace, NAD, nom</small></span></button>
+  <button type="button" data-step="2"><span class="num">2</span><span class="lbl"><b>Security groups</b><small id="sgCount">0 groupe</small></span></button>
+  <button type="button" data-step="3"><span class="num">3</span><span class="lbl"><b>Flux</b><small id="flowCount">0 flux</small></span></button>
+  <button type="button" data-step="4"><span class="num">4</span><span class="lbl"><b>YAML</b><small id="polCount">0 policy</small></span></button>
+</nav>
 
-    <section class="card">
-      <h2>Annotation <code>k8s.v1.cni.cncf.io/policy-for</code></h2>
-      <div class="grid2">
-        <label class="field"><span>Namespace de la NAD</span>
-          <input type="text" id="nadNs" value="dc-elsan-eds" spellcheck="false">
-        </label>
-        <label class="field"><span>Nom de la NAD</span>
-          <input type="text" id="nadName" value="eds-promptly-travail-10-235-10-0-24" spellcheck="false">
-        </label>
-      </div>
-      <div class="hint" id="annotPreview"></div>
-    </section>
-
-    <section class="card">
-      <h2>podSelector</h2>
-      <label class="field"><span>Labels (matchLabels)</span>
-        <textarea id="podLabels" rows="2" placeholder="app=frontend&#10;tier=web" spellcheck="false"></textarea>
-        <div class="hint">Une ligne <code>clé=valeur</code> par label. Vide = <code>{}</code> (tous les pods du namespace).</div>
-      </label>
-    </section>
-
-    <section class="card">
-      <h2>Types de politique</h2>
-      <div class="toggles">
-        <label><input type="checkbox" id="useIngress"> Ingress (trafic entrant → <code>from</code>)</label>
-        <label><input type="checkbox" id="useEgress"> Egress (trafic sortant → <code>to</code>)</label>
-      </div>
-      <div class="hint">Un type coché sans aucune règle = tout est bloqué dans ce sens (deny all).</div>
-    </section>
-
-    <section class="card" id="ingressCard">
-      <h2>Règles Ingress <small style="font-weight:400;color:var(--muted)">— sources autorisées (<code>from</code>)</small></h2>
-      <div id="ingressRules"></div>
-      <button type="button" class="small" data-add-rule="ingress">+ Ajouter une règle ingress</button>
-    </section>
-
-    <section class="card" id="egressCard">
-      <h2>Règles Egress <small style="font-weight:400;color:var(--muted)">— destinations autorisées (<code>to</code>)</small></h2>
-      <div id="egressRules"></div>
-      <button type="button" class="small" data-add-rule="egress">+ Ajouter une règle egress</button>
-    </section>
+<!-- ÉTAPE 1 -->
+<section class="card" data-panel="1">
+  <h2>1. Contexte</h2>
+  <p class="lead">Où les règles s'appliquent : le namespace des pods et le réseau secondaire (NAD) filtré.</p>
+  <div class="grid2">
+    <label class="field"><span>Nom de la règle</span>
+      <input type="text" id="m_name" spellcheck="false" placeholder="ex. promptly-travail">
+      <div class="hint">Sert de préfixe : chaque objet généré s'appellera <code>&lt;nom&gt;-&lt;groupe&gt;-ingress|egress</code>.</div>
+    </label>
+    <label class="field"><span>Namespace</span>
+      <input type="text" id="m_namespace" spellcheck="false" placeholder="ex. dc-sofia-dev">
+      <div class="hint">Namespace des pods protégés (là où les MultiNetworkPolicy sont créées).</div>
+    </label>
+    <label class="field"><span>Namespace de la NAD</span>
+      <input type="text" id="m_nadNs" spellcheck="false" placeholder="ex. dc-elsan-eds">
+    </label>
+    <label class="field"><span>Nom de la NAD</span>
+      <input type="text" id="m_nadName" spellcheck="false" placeholder="ex. eds-promptly-travail-10-235-10-0-24">
+    </label>
   </div>
+  <p class="hint" id="annotPreview"></p>
+  <label class="chk" style="margin-top:12px"><input type="checkbox" id="m_defaultDeny">
+    <span>Générer aussi les politiques « deny all » (ingress et egress) pour tous les pods du namespace sur cette NAD
+    <span class="hint" style="display:block;font-weight:400">Sans elles, seuls les pods des groupes internes ciblés par un flux sont filtrés ; les autres pods restent ouverts.</span></span></label>
+  <ul class="msgs err" id="err1" style="margin-top:12px"></ul>
+  <div class="navbtns"><span></span><button type="button" class="primary" data-go="2">Suivant : security groups →</button></div>
+</section>
 
-  <div class="output">
-    <section class="card">
-      <h2>YAML généré</h2>
-      <div class="actions">
-        <button type="button" class="primary" id="copyBtn">Copier</button>
-        <button type="button" id="dlBtn">Télécharger .yaml</button>
-        <button type="button" id="resetBtn">Réinitialiser</button>
-        <span class="status" id="status" aria-live="polite"></span>
-      </div>
-      <pre id="yaml"></pre>
-      <ul id="errors"></ul>
-    </section>
+<!-- ÉTAPE 2 -->
+<section class="card" data-panel="2" hidden>
+  <h2>2. Security groups</h2>
+  <p class="lead">Un groupe = une ou plusieurs IP / réseaux. Cochez « interne » si le groupe représente des pods du namespace
+    <code id="nsRef"></code> : c'est sur eux que les règles seront posées.</p>
+  <div id="sgList"></div>
+  <ul class="msgs err" id="err2"></ul>
+  <div class="navbtns">
+    <button type="button" data-go="1">← Contexte</button>
+    <span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <button type="button" id="addSg">+ Ajouter un security group</button>
+      <button type="button" class="primary" data-go="3">Suivant : flux →</button>
+    </span>
   </div>
-</main>
+</section>
 
-<template id="ruleTpl">
-  <div class="rule">
-    <div class="rule-head"><strong class="rule-title"></strong>
-      <button type="button" class="link small" data-act="del-rule">Supprimer la règle</button></div>
-    <div class="sub">
-      <div class="sub-title peers-title"></div>
-      <div class="peers"></div>
-      <button type="button" class="small" data-act="add-peer">+ ipBlock</button>
-    </div>
-    <div class="sub">
-      <div class="sub-title">Ports</div>
-      <div class="ports"></div>
-      <button type="button" class="small" data-act="add-port">+ Port</button>
-    </div>
+<!-- ÉTAPE 3 -->
+<section class="card" data-panel="3" hidden>
+  <h2>3. Flux autorisés</h2>
+  <p class="lead">Chaque flux autorise une source à joindre une destination sur des ports. Tout ce qui n'est pas listé est bloqué
+    pour les pods filtrés.</p>
+  <div id="flowList"></div>
+  <ul class="msgs err" id="err3"></ul>
+  <div class="navbtns">
+    <button type="button" data-go="2">← Security groups</button>
+    <span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <button type="button" id="addFlow">+ Ajouter un flux</button>
+      <button type="button" class="primary" data-go="4">Générer le YAML →</button>
+    </span>
   </div>
-</template>
+</section>
+
+<!-- ÉTAPE 4 -->
+<section class="card" data-panel="4" hidden>
+  <h2>4. YAML généré</h2>
+  <p class="lead">Un objet par groupe interne et par sens : jamais d'ingress et d'egress dans la même MultiNetworkPolicy.</p>
+  <ul class="msgs err" id="err4"></ul>
+  <ul class="msgs warn" id="warn4"></ul>
+  <div class="table-wrap"><table id="polTable"></table></div>
+  <div class="actions">
+    <button type="button" class="primary" id="copyBtn">Copier tout</button>
+    <button type="button" id="dlBtn">Télécharger .yaml</button>
+    <span class="status" id="status" aria-live="polite"></span>
+  </div>
+  <pre id="yaml"></pre>
+  <div class="navbtns" style="margin-top:12px"><button type="button" data-go="3">← Flux</button><span></span></div>
+</section>
+</div>
 
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const STORE_KEY = 'mnp-generator-v1';
-  const state = { ingress: [], egress: [] };
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const STORE_KEY = 'mnp-sg-generator-v2';
+  const uid = () => Math.random().toString(36).slice(2, 9);
 
-  /* ---------- Thème ---------- */
-  const applyTheme = (t) => { if (t) document.documentElement.setAttribute('data-theme', t); };
-  try { applyTheme(localStorage.getItem('mnp-theme')); } catch (e) {}
-  $('themeBtn').onclick = () => {
-    const cur = document.documentElement.getAttribute('data-theme')
-      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    const next = cur === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-    try { localStorage.setItem('mnp-theme', next); } catch (e) {}
-  };
+  const blank = () => ({
+    meta: { name: '', namespace: '', nadNs: '', nadName: '', defaultDeny: false },
+    sgs: [], flows: [], step: 1,
+  });
+  let S = blank();
 
-  /* ---------- Validation ---------- */
-  const DNS1123_SUB = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
-  const DNS1123_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
-  const IANA_SVC = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+  /* ================= Validation de base ================= */
+  const DNS_SUB = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+  const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+  const LABEL_KEY = /^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
+  const LABEL_VAL = /^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])?$/;
 
-  function parseIPv4(s) {
-    const p = s.split('.');
-    if (p.length !== 4) return null;
+  function parseV4(s) {
+    const p = s.split('.'); if (p.length !== 4) return null;
     let n = 0;
-    for (const x of p) {
-      if (!/^\d{1,3}$/.test(x) || +x > 255) return null;
-      n = n * 256 + +x;
-    }
+    for (const x of p) { if (!/^\d{1,3}$/.test(x) || +x > 255) return null; n = n * 256 + +x; }
     return n;
   }
-  function isIPv6(s) {
+  const v4str = (n) => [24, 16, 8, 0].map(s => (n >>> s) & 255).join('.');
+  function isV6(s) {
     if (!/^[0-9a-fA-F:.]+$/.test(s) || !s.includes(':')) return false;
     try { new URL('http://[' + s + ']/'); return true; } catch (e) { return false; }
   }
-  // Retourne {ok, v4, net, bits, msg}
-  function checkCidr(c) {
-    const m = c.match(/^(.+)\/(\d{1,3})$/);
-    if (!m) return { ok: false, msg: 'format attendu a.b.c.d/nn' };
-    const bits = +m[2];
-    const v4 = parseIPv4(m[1]);
+  // Normalise une entrée IP ou CIDR -> {ok, cidr, msg}
+  function normIp(raw) {
+    const s = raw.trim();
+    const m = s.match(/^([^/]+)(?:\/(\d{1,3}))?$/);
+    if (!m) return { ok: false, msg: 'format attendu IP ou IP/masque' };
+    const v4 = parseV4(m[1]);
     if (v4 !== null) {
+      const bits = m[2] === undefined ? 32 : +m[2];
       if (bits > 32) return { ok: false, msg: 'masque > 32' };
       const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
-      return { ok: true, v4: true, net: (v4 & mask) >>> 0, addr: v4, bits, mask };
+      if (((v4 & mask) >>> 0) !== v4) return { ok: false, msg: 'bits d\'hôte non nuls, réseau attendu ' + v4str((v4 & mask) >>> 0) + '/' + bits };
+      return { ok: true, cidr: v4str(v4) + '/' + bits };
     }
-    if (isIPv6(m[1])) {
+    if (isV6(m[1])) {
+      const bits = m[2] === undefined ? 128 : +m[2];
       if (bits > 128) return { ok: false, msg: 'masque > 128' };
-      return { ok: true, v4: false };
+      return { ok: true, cidr: m[1].toLowerCase() + '/' + bits };
     }
     return { ok: false, msg: 'adresse IP invalide' };
   }
-
-  /* ---------- Modèle ---------- */
-  const newPeer = () => ({ cidr: '', except: '' });
-  const newPort = () => ({ protocol: 'TCP', port: '', endPort: '' });
-  const newRule = () => ({ peers: [newPeer()], ports: [newPort()] });
-
-  /* ---------- Rendu du formulaire ---------- */
-  function renderRules(dir) {
-    const host = $(dir + 'Rules');
-    host.innerHTML = '';
-    const kw = dir === 'ingress' ? 'from' : 'to';
-    if (!state[dir].length) {
-      host.innerHTML = '<p class="empty-note">Aucune règle : si « ' + (dir === 'ingress' ? 'Ingress' : 'Egress') +
-        ' » est coché, tout le trafic ' + (dir === 'ingress' ? 'entrant' : 'sortant') + ' est bloqué.</p>';
+  const splitList = (txt) => txt.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  function parseLabels(txt) {
+    const out = [], errs = [];
+    for (const line of txt.split('\n')) {
+      const l = line.trim(); if (!l) continue;
+      const i = l.indexOf('=');
+      if (i < 1) { errs.push('« ' + l + ' » : format clé=valeur attendu'); continue; }
+      const k = l.slice(0, i).trim(), v = l.slice(i + 1).trim();
+      if (!LABEL_KEY.test(k)) errs.push('clé de label « ' + k + ' » invalide');
+      else if (v.length > 63 || !LABEL_VAL.test(v)) errs.push('valeur de label « ' + v + ' » invalide');
+      else out.push([k, v]);
     }
-    state[dir].forEach((rule, ri) => {
-      const node = $('ruleTpl').content.firstElementChild.cloneNode(true);
-      node.querySelector('.rule-title').textContent = 'Règle ' + (ri + 1);
-      node.querySelector('.peers-title').textContent = kw + ' — ipBlock';
-      node.querySelector('[data-act=del-rule]').onclick = () => { state[dir].splice(ri, 1); renderRules(dir); update(); };
-      node.querySelector('[data-act=add-peer]').onclick = () => { rule.peers.push(newPeer()); renderRules(dir); update(); };
-      node.querySelector('[data-act=add-port]').onclick = () => { rule.ports.push(newPort()); renderRules(dir); update(); };
+    return { labels: out, errs };
+  }
+  const sgById = (id) => S.sgs.find(g => g.id === id);
+  const sgLabel = (g) => g ? (g.name || '(sans nom)') : '(groupe supprimé)';
 
-      const peersEl = node.querySelector('.peers');
-      if (!rule.peers.length) peersEl.innerHTML = '<p class="empty-note">Aucun ipBlock : toutes les ' +
-        (dir === 'ingress' ? 'sources' : 'destinations') + ' sont autorisées sur les ports ci-dessous.</p>';
-      rule.peers.forEach((p, pi) => {
-        const row = document.createElement('div');
-        row.className = 'row ip';
-        row.innerHTML = '<input type="text" placeholder="CIDR ex. 10.235.10.0/24" spellcheck="false" aria-label="CIDR">' +
-          '<input type="text" placeholder="except (optionnel) : 10.235.10.5/32, …" spellcheck="false" aria-label="except">' +
-          '<button type="button" class="link" title="Supprimer">✕</button>';
-        const [cidr, exc, del] = row.children;
-        cidr.value = p.cidr; exc.value = p.except;
-        cidr.dataset.check = dir + '|' + ri + '|' + pi + '|cidr';
-        exc.dataset.check = dir + '|' + ri + '|' + pi + '|except';
-        cidr.oninput = () => { p.cidr = cidr.value.trim(); update(); };
-        exc.oninput = () => { p.except = exc.value; update(); };
-        del.onclick = () => { rule.peers.splice(pi, 1); renderRules(dir); update(); };
-        peersEl.appendChild(row);
-      });
+  /* ================= Modèle -> politiques ================= */
+  function analyse() {
+    const errs = { 1: [], 2: [], 3: [] }, warns = [];
+    const m = S.meta;
+    if (!m.name || m.name.length > 200 || !DNS_SUB.test(m.name)) errs[1].push('Nom de la règle : minuscules, chiffres, « - » ou « . » (DNS-1123).');
+    if (!m.namespace || m.namespace.length > 63 || !DNS_LABEL.test(m.namespace)) errs[1].push('Namespace invalide (DNS-1123, 63 car. max).');
+    if (!m.nadNs || m.nadNs.length > 63 || !DNS_LABEL.test(m.nadNs)) errs[1].push('Namespace de la NAD invalide.');
+    if (!m.nadName || !DNS_SUB.test(m.nadName)) errs[1].push('Nom de la NAD invalide.');
 
-      const portsEl = node.querySelector('.ports');
-      if (!rule.ports.length) portsEl.innerHTML = '<p class="empty-note">Aucun port : tous les ports/protocoles sont autorisés.</p>';
-      rule.ports.forEach((p, qi) => {
-        const row = document.createElement('div');
-        row.className = 'row port';
-        row.innerHTML = '<select aria-label="Protocole"><option>TCP</option><option>UDP</option><option>SCTP</option></select>' +
-          '<input type="text" placeholder="port ex. 443" spellcheck="false" aria-label="port">' +
-          '<input type="number" min="1" max="65535" placeholder="endPort (option.)" aria-label="endPort">' +
-          '<button type="button" class="link" title="Supprimer">✕</button>';
-        const [proto, port, end, del] = row.children;
-        proto.value = p.protocol; port.value = p.port; end.value = p.endPort;
-        port.dataset.check = dir + '|' + ri + '|' + qi + '|port';
-        end.dataset.check = dir + '|' + ri + '|' + qi + '|endPort';
-        proto.onchange = () => { p.protocol = proto.value; update(); };
-        port.oninput = () => { p.port = port.value.trim(); update(); };
-        end.oninput = () => { p.endPort = end.value.trim(); update(); };
-        del.onclick = () => { rule.ports.splice(qi, 1); renderRules(dir); update(); };
-        portsEl.appendChild(row);
-      });
-      host.appendChild(node);
+    const sgInfo = {};
+    const names = new Set();
+    S.sgs.forEach((g, i) => {
+      const where = 'Groupe « ' + sgLabel(g) + ' »';
+      const info = { cidrs: [], badIps: false, labels: [], badLabels: false, badName: false };
+      if (!g.name || g.name.length > 50 || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - », 50 car. max).'); info.badName = true; }
+      else if (names.has(g.name)) { errs[2].push('Nom de groupe en double : « ' + g.name + ' ».'); info.badName = true; }
+      names.add(g.name);
+      const seen = new Set();
+      for (const raw of splitList(g.ips)) {
+        const r = normIp(raw);
+        if (!r.ok) { errs[2].push(where + ' : « ' + raw + ' » — ' + r.msg + '.'); info.badIps = true; }
+        else if (!seen.has(r.cidr)) { seen.add(r.cidr); info.cidrs.push(r.cidr); }
+      }
+      if (g.internal) {
+        const pl = parseLabels(g.labels);
+        pl.errs.forEach(e => errs[2].push(where + ' : ' + e + '.'));
+        info.badLabels = pl.errs.length > 0;
+        info.labels = pl.labels;
+      } else if (!info.cidrs.length && !info.badIps) {
+        errs[2].push(where + ' : un groupe externe doit contenir au moins une IP.'); info.badIps = true;
+      }
+      sgInfo[g.id] = info;
     });
-  }
 
-  /* ---------- Validation globale ---------- */
-  function validate() {
-    const errs = [];
-    const bad = new Set();
-    const name = $('name').value.trim(), ns = $('namespace').value.trim();
-    const nadNs = $('nadNs').value.trim(), nadName = $('nadName').value.trim();
-    const mark = (id, cond, msg) => { $(id).classList.toggle('invalid', !cond); if (!cond) errs.push(msg); };
-    mark('name', name && name.length <= 253 && DNS1123_SUB.test(name), 'Nom de la règle invalide (DNS-1123).');
-    mark('namespace', ns && ns.length <= 63 && DNS1123_LABEL.test(ns), 'Namespace invalide (DNS-1123, 63 car. max).');
-    mark('nadNs', nadNs && DNS1123_LABEL.test(nadNs), 'Namespace de la NAD invalide.');
-    mark('nadName', nadName && DNS1123_SUB.test(nadName), 'Nom de la NAD invalide.');
-
-    for (const line of $('podLabels').value.split('\n')) {
-      if (!line.trim()) continue;
-      if (!/^\s*[^=\s]+\s*=\s*[^=]*$/.test(line)) { errs.push('podSelector : ligne « ' + line.trim() + ' » attendue au format clé=valeur.'); }
-    }
-
-    if (!$('useIngress').checked && !$('useEgress').checked)
-      errs.push('Cochez au moins Ingress ou Egress (policyTypes vide = aucune restriction appliquée).');
-
-    for (const dir of ['ingress', 'egress']) {
-      if (!$(dir === 'ingress' ? 'useIngress' : 'useEgress').checked) continue;
-      const D = dir === 'ingress' ? 'Ingress' : 'Egress';
-      state[dir].forEach((r, ri) => {
-        r.peers.forEach((p, pi) => {
-          const where = D + ' règle ' + (ri + 1) + ', ipBlock ' + (pi + 1);
-          const c = checkCidr(p.cidr);
-          if (!c.ok) { errs.push(where + ' : CIDR « ' + (p.cidr || '(vide)') + ' » — ' + c.msg + '.'); bad.add(dir + '|' + ri + '|' + pi + '|cidr'); return; }
-          if (c.v4 && c.addr !== c.net) errs.push(where + ' : ' + p.cidr + ' a des bits d\'hôte ; réseau attendu probablement ' +
-            [24, 16, 8, 0].map(s => (c.net >>> s) & 255).join('.') + '/' + c.bits + '.');
-          for (const e of p.except.split(',').map(s => s.trim()).filter(Boolean)) {
-            const ce = checkCidr(e);
-            if (!ce.ok) { errs.push(where + ' : except « ' + e + ' » — ' + ce.msg + '.'); bad.add(dir + '|' + ri + '|' + pi + '|except'); continue; }
-            if (c.v4 !== ce.v4) { errs.push(where + ' : except « ' + e + ' » n\'est pas de la même famille IP que le CIDR.'); bad.add(dir + '|' + ri + '|' + pi + '|except'); continue; }
-            if (c.v4 && (ce.bits <= c.bits || ((ce.addr & c.mask) >>> 0) !== c.net)) {
-              errs.push(where + ' : except « ' + e + ' » doit être strictement inclus dans ' + p.cidr + '.');
-              bad.add(dir + '|' + ri + '|' + pi + '|except');
-            }
-          }
-        });
-        r.ports.forEach((p, qi) => {
-          const where = D + ' règle ' + (ri + 1) + ', port ' + (qi + 1);
-          const key = dir + '|' + ri + '|' + qi;
-          const numeric = /^\d+$/.test(p.port);
-          if (p.port === '') {
-            if (p.endPort) { errs.push(where + ' : endPort nécessite un port.'); bad.add(key + '|port'); }
-          } else if (numeric) {
-            if (+p.port < 1 || +p.port > 65535) { errs.push(where + ' : port hors plage 1-65535.'); bad.add(key + '|port'); }
-          } else if (!(p.port.length <= 15 && IANA_SVC.test(p.port) && /[a-z]/.test(p.port))) {
-            errs.push(where + ' : port nommé « ' + p.port + ' » invalide.'); bad.add(key + '|port');
-          }
-          if (p.endPort !== '') {
-            if (!numeric) { errs.push(where + ' : endPort exige un port numérique.'); bad.add(key + '|endPort'); }
-            else if (!/^\d+$/.test(p.endPort) || +p.endPort > 65535 || +p.endPort < +p.port) {
-              errs.push(where + ' : endPort doit être ≥ port et ≤ 65535.'); bad.add(key + '|endPort');
-            }
-          }
-        });
+    // Politiques : clé = sens + groupe interne ciblé
+    const pols = new Map();
+    const getPol = (dir, g) => {
+      const key = dir + '|' + g.id;
+      if (!pols.has(key)) pols.set(key, { dir, sg: g, rules: [] });
+      return pols.get(key);
+    };
+    const flowState = {};
+    S.flows.forEach((f, i) => {
+      const where = 'Flux ' + (i + 1);
+      const src = sgById(f.src), dst = sgById(f.dst);
+      const fe = { src: false, dst: false, ports: new Set(), effects: [] };
+      flowState[f.id] = fe;
+      if (!src) { errs[3].push(where + ' : choisissez une source.'); fe.src = true; }
+      if (!dst) { errs[3].push(where + ' : choisissez une destination.'); fe.dst = true; }
+      // Ports
+      const ports = [];
+      f.ports.forEach((p, qi) => {
+        const pw = where + ', port ' + (qi + 1);
+        const numeric = /^\d+$/.test(p.port);
+        if (p.port === '' && p.endPort === '') return;
+        let bad = false;
+        if (p.port === '') { errs[3].push(pw + ' : port de début manquant.'); bad = true; }
+        else if (numeric && (+p.port < 1 || +p.port > 65535)) { errs[3].push(pw + ' : port hors plage 1-65535.'); bad = true; }
+        else if (!numeric && !(p.port.length <= 15 && DNS_LABEL.test(p.port) && /[a-z]/.test(p.port))) { errs[3].push(pw + ' : port nommé « ' + p.port + ' » invalide.'); bad = true; }
+        if (!bad && p.endPort !== '') {
+          if (!numeric) { errs[3].push(pw + ' : une plage exige un port numérique.'); bad = true; }
+          else if (!/^\d+$/.test(p.endPort) || +p.endPort > 65535 || +p.endPort < +p.port) { errs[3].push(pw + ' : fin de plage doit être ≥ début et ≤ 65535.'); bad = true; }
+        }
+        if (bad) fe.ports.add(qi); else ports.push({ protocol: p.protocol, port: p.port, endPort: p.endPort && p.endPort !== p.port ? p.endPort : '' });
       });
+      if (!src || !dst) return;
+      if (!ports.length) warns.push(where + ' (' + sgLabel(src) + ' → ' + sgLabel(dst) + ') : aucun port, tous les ports et protocoles sont autorisés.');
+      if (!src.internal && !dst.internal) {
+        errs[3].push(where + ' : au moins la source ou la destination doit être un groupe interne (pods du namespace), sinon aucune MultiNetworkPolicy ne peut filtrer ce flux.');
+        fe.src = fe.dst = true; return;
+      }
+      if (dst.internal) {
+        const peers = sgInfo[src.id].cidrs;
+        if (!peers.length) { errs[3].push(where + ' : la source « ' + sgLabel(src) + ' » n\'a aucune IP, impossible d\'écrire la règle ingress.'); fe.src = true; }
+        else { getPol('ingress', dst).rules.push({ flow: f, idx: i + 1, src, dst, peers, ports }); fe.effects.push(['in', dst]); }
+      }
+      if (src.internal) {
+        const peers = sgInfo[dst.id].cidrs;
+        if (!peers.length) { errs[3].push(where + ' : la destination « ' + sgLabel(dst) + ' » n\'a aucune IP, impossible d\'écrire la règle egress.'); fe.dst = true; }
+        else { getPol('egress', src).rules.push({ flow: f, idx: i + 1, src, dst, peers, ports }); fe.effects.push(['out', src]); }
+      }
+    });
+
+    // Pods internes sans règle dans un sens : avertissement
+    S.sgs.filter(g => g.internal).forEach(g => {
+      if (!S.flows.some(f => f.src === g.id || f.dst === g.id))
+        warns.push('Le groupe interne « ' + sgLabel(g) + ' » n\'est utilisé dans aucun flux.');
+    });
+    const internals = S.sgs.filter(g => g.internal);
+    for (let a = 0; a < internals.length; a++) for (let b = a + 1; b < internals.length; b++) {
+      const la = sgInfo[internals[a].id].labels, lb = sgInfo[internals[b].id].labels;
+      const sub = (x, y) => x.every(([k, v]) => y.some(([k2, v2]) => k === k2 && v === v2));
+      if (sub(la, lb) || sub(lb, la))
+        warns.push('Les groupes internes « ' + sgLabel(internals[a]) + ' » et « ' + sgLabel(internals[b]) + ' » sélectionnent (au moins en partie) les mêmes pods : leurs règles se cumulent sur ces pods.');
     }
-    document.querySelectorAll('[data-check]').forEach(el => el.classList.toggle('invalid', bad.has(el.dataset.check)));
-    return errs;
+
+    const list = [...pols.values()].sort((x, y) => (x.sg.name || '').localeCompare(y.sg.name || '') || x.dir.localeCompare(y.dir));
+    return { errs, warns, pols: list, sgInfo, flowState };
   }
 
-  /* ---------- Génération YAML ---------- */
-  function q(s) {
-    // Scalaire YAML : guillemets si nécessaire
-    if (s === '' || /^[\s]|[\s]$|[:#\[\]{},&*!|>'"%@`]|^(true|false|yes|no|on|off|null|~|y|n)$/i.test(s) || /^[-?\d.]/.test(s))
-      return JSON.stringify(s);
-    return s;
-  }
-  function buildYaml() {
-    const L = [];
-    const name = $('name').value.trim(), ns = $('namespace').value.trim();
-    const annot = $('nadNs').value.trim() + '/' + $('nadName').value.trim();
+  /* ================= Génération YAML ================= */
+  const q = (s) => (s === '' || /[:#\[\]{},&*!|>'"%@`\s]|^[-?\d.]|^(true|false|yes|no|on|off|null|~|y|n)$/i.test(s)) ? JSON.stringify(s) : s;
+  function header(L, name, comment) {
+    L.push('---');
+    if (comment) comment.forEach(c => L.push('# ' + c));
     L.push('apiVersion: k8s.cni.cncf.io/v1beta1');
     L.push('kind: MultiNetworkPolicy');
     L.push('metadata:');
     L.push('  name: ' + q(name));
-    L.push('  namespace: ' + q(ns));
+    L.push('  namespace: ' + q(S.meta.namespace));
     L.push('  annotations:');
-    L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(annot));
+    L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(S.meta.nadNs + '/' + S.meta.nadName));
     L.push('spec:');
-    const labels = $('podLabels').value.split('\n').map(l => l.trim()).filter(l => l.includes('='))
-      .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; });
-    if (!labels.length) L.push('  podSelector: {}');
-    else {
-      L.push('  podSelector:');
-      L.push('    matchLabels:');
-      labels.forEach(([k, v]) => L.push('      ' + q(k) + ': ' + JSON.stringify(v)));
-    }
-    const types = [];
-    if ($('useIngress').checked) types.push('Ingress');
-    if ($('useEgress').checked) types.push('Egress');
-    if (!types.length) L.push('  policyTypes: []');
-    else { L.push('  policyTypes:'); types.forEach(t => L.push('    - ' + t)); }
+  }
+  function podSelector(L, labels) {
+    if (!labels.length) { L.push('  podSelector: {}'); return; }
+    L.push('  podSelector:');
+    L.push('    matchLabels:');
+    labels.forEach(([k, v]) => L.push('      ' + q(k) + ': ' + JSON.stringify(v)));
+  }
+  const oneLine = (s) => s.replace(/[\r\n]+/g, ' ');
+  function polName(p) { return S.meta.name + '-' + p.sg.name + '-' + p.dir; }
 
-    for (const dir of ['ingress', 'egress']) {
-      if (!types.includes(dir === 'ingress' ? 'Ingress' : 'Egress')) continue;
-      const kw = dir === 'ingress' ? 'from' : 'to';
-      if (!state[dir].length) { L.push('  ' + dir + ': []'); continue; }
-      L.push('  ' + dir + ':');
-      state[dir].forEach(r => {
-        const peers = r.peers.filter(p => p.cidr);
-        const ports = r.ports.filter(p => p.port || p.endPort);
-        if (!peers.length && !ports.length) { L.push('    - {}'); return; }
-        let first = true;
-        const item = (line) => { L.push((first ? '    - ' : '      ') + line); first = false; };
-        if (peers.length) {
-          item(kw + ':');
-          peers.forEach(p => {
-            L.push('        - ipBlock:');
-            L.push('            cidr: ' + p.cidr);
-            const ex = p.except.split(',').map(s => s.trim()).filter(Boolean);
-            if (ex.length) { L.push('            except:'); ex.forEach(e => L.push('              - ' + e)); }
-          });
-        }
-        if (ports.length) {
-          item('ports:');
-          ports.forEach(p => {
-            L.push('        - protocol: ' + p.protocol);
-            if (p.port) L.push('          port: ' + (/^\d+$/.test(p.port) ? p.port : q(p.port)));
-            if (p.endPort) L.push('          endPort: ' + p.endPort);
-          });
-        }
-      });
+  function buildYaml(A) {
+    const L = [], objs = [];
+    const push = (name, kind, target, rules, lines) => objs.push({ name, kind, target, rules, text: lines.join('\n') + '\n' });
+    if (S.meta.defaultDeny) {
+      for (const dir of ['ingress', 'egress']) {
+        const l = [], n = S.meta.name + '-default-deny-' + dir;
+        header(l, n, ['Bloque tout le trafic ' + (dir === 'ingress' ? 'entrant' : 'sortant') + ' non autorisé explicitement']);
+        l.push('  podSelector: {}');
+        l.push('  policyTypes:');
+        l.push('    - ' + (dir === 'ingress' ? 'Ingress' : 'Egress'));
+        l.push('  ' + dir + ': []');
+        push(n, dir, 'tous les pods', 0, l);
+      }
     }
-    return L.join('\n') + '\n';
+    for (const p of A.pols) {
+      const l = [], n = polName(p), kw = p.dir === 'ingress' ? 'from' : 'to';
+      header(l, n, ['Groupe interne : ' + p.sg.name + ' — ' + (p.dir === 'ingress' ? 'flux entrants' : 'flux sortants')]);
+      podSelector(l, A.sgInfo[p.sg.id].labels);
+      l.push('  policyTypes:');
+      l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
+      l.push('  ' + p.dir + ':');
+      for (const r of p.rules) {
+        l.push('    # Flux ' + r.idx + ' : ' + r.src.name + ' → ' + r.dst.name + (r.flow.desc ? ' — ' + oneLine(r.flow.desc) : ''));
+        l.push('    - ' + kw + ':');
+        r.peers.forEach(c => { l.push('        - ipBlock:'); l.push('            cidr: ' + c); });
+        if (r.ports.length) {
+          l.push('      ports:');
+          r.ports.forEach(pt => {
+            l.push('        - protocol: ' + pt.protocol);
+            l.push('          port: ' + (/^\d+$/.test(pt.port) ? pt.port : q(pt.port)));
+            if (pt.endPort) l.push('          endPort: ' + pt.endPort);
+          });
+        }
+      }
+      const labels = A.sgInfo[p.sg.id].labels;
+      push(n, p.dir, labels.length ? labels.map(([k, v]) => k + '=' + v).join(', ') : 'tous les pods', p.rules.length, l);
+    }
+    return objs;
   }
 
   function highlight(yaml) {
-    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return yaml.split('\n').map(line => {
+      if (/^\s*#/.test(line) || line === '---') return '<span class="c">' + esc(line) + '</span>';
       const m = line.match(/^(\s*(?:- )?)([^:\s][^:]*?):(\s|$)(.*)$/);
       if (!m) return esc(line).replace(/^(\s*- )(.+)$/, (_, a, b) => a + '<span class="s">' + b + '</span>');
-      const val = m[4];
-      const cls = /^\d+$/.test(val) ? 'n' : 's';
-      return esc(m[1]) + '<span class="k">' + esc(m[2]) + '</span>:' + m[3] + (val ? '<span class="' + cls + '">' + esc(val) + '</span>' : '');
+      const cls = /^\d+$/.test(m[4]) ? 'n' : 's';
+      return esc(m[1]) + '<span class="k">' + esc(m[2]) + '</span>:' + m[3] + (m[4] ? '<span class="' + cls + '">' + esc(m[4]) + '</span>' : '');
     }).join('\n');
   }
 
-  /* ---------- Persistance locale (confort) ---------- */
-  const FIELDS = ['name', 'namespace', 'nadNs', 'nadName', 'podLabels'];
-  function save() {
-    try {
-      const data = { state, ing: $('useIngress').checked, eg: $('useEgress').checked };
-      FIELDS.forEach(f => data[f] = $(f).value);
-      localStorage.setItem(STORE_KEY, JSON.stringify(data));
-    } catch (e) {}
-  }
-  function load() {
-    try {
-      const data = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (!data) return false;
-      FIELDS.forEach(f => { if (typeof data[f] === 'string') $(f).value = data[f]; });
-      $('useIngress').checked = !!data.ing; $('useEgress').checked = !!data.eg;
-      state.ingress = data.state.ingress || []; state.egress = data.state.egress || [];
-      return true;
-    } catch (e) { return false; }
+  /* ================= Rendu ================= */
+  const META = ['name', 'namespace', 'nadNs', 'nadName'];
+  function renderMeta() {
+    META.forEach(k => { $('m_' + k).value = S.meta[k]; });
+    $('m_defaultDeny').checked = !!S.meta.defaultDeny;
   }
 
-  let currentYaml = '';
-  function update() {
-    $('ingressCard').classList.toggle('disabled', !$('useIngress').checked);
-    $('egressCard').classList.toggle('disabled', !$('useEgress').checked);
-    $('annotPreview').innerHTML = 'Valeur : <code></code>';
-    $('annotPreview').firstElementChild.textContent = $('nadNs').value.trim() + '/' + $('nadName').value.trim();
-    const errs = validate();
-    currentYaml = buildYaml();
-    $('yaml').innerHTML = highlight(currentYaml);
-    const ul = $('errors'); ul.innerHTML = '';
-    errs.forEach(e => { const li = document.createElement('li'); li.textContent = e; ul.appendChild(li); });
+  function renderSgs() {
+    const host = $('sgList');
+    if (!S.sgs.length) { host.innerHTML = '<p class="empty">Aucun security group. Ajoutez-en au moins un groupe interne (vos pods) et un groupe pour l\'autre extrémité.</p>'; return; }
+    host.innerHTML = '';
+    S.sgs.forEach((g, i) => {
+      const used = S.flows.filter(f => f.src === g.id || f.dst === g.id).length;
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.innerHTML =
+        '<div class="item-head"><strong>Groupe ' + (i + 1) + ' <span class="tag ' + (g.internal ? 'in' : 'ext') + '">' + (g.internal ? 'interne' : 'externe') + '</span>' +
+        (used ? ' <span class="hint">· utilisé dans ' + used + ' flux</span>' : '') + '</strong>' +
+        '<button type="button" class="danger small" data-del>Supprimer</button></div>' +
+        '<div class="grid2">' +
+          '<label class="field"><span>Nom du groupe</span><input type="text" data-f="name" spellcheck="false" placeholder="ex. app-front"></label>' +
+          '<label class="field"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel"></label>' +
+        '</div>' +
+        '<label class="field" style="margin-top:10px"><span>IP / réseaux</span>' +
+          '<textarea data-f="ips" rows="3" spellcheck="false" placeholder="10.235.10.12&#10;10.235.10.13&#10;10.235.20.0/24"></textarea>' +
+          '<div class="hint">Une entrée par ligne (ou séparées par virgule). IP seule = /32. Pour un groupe interne, ce sont les IP des pods sur la NAD (utilisées quand le groupe est l\'extrémité distante d\'un flux).</div></label>' +
+        '<label class="chk" style="margin-top:10px"><input type="checkbox" data-f="internal"><span>Groupe interne : pods du namespace à protéger</span></label>' +
+        '<label class="field" data-labels style="margin-top:8px"><span>Labels des pods (podSelector)</span>' +
+          '<textarea data-f="labels" rows="2" spellcheck="false" placeholder="app=front"></textarea>' +
+          '<div class="hint">Une ligne <code>clé=valeur</code>. Vide = tous les pods du namespace attachés à la NAD. Une MultiNetworkPolicy ne peut pas cibler des pods par IP, d\'où ces labels.</div></label>';
+      el.querySelectorAll('[data-f]').forEach(inp => {
+        const f = inp.dataset.f;
+        if (inp.type === 'checkbox') inp.checked = !!g[f]; else inp.value = g[f] || '';
+        inp.addEventListener(inp.type === 'checkbox' ? 'change' : 'input', () => {
+          g[f] = inp.type === 'checkbox' ? inp.checked : inp.value;
+          if (f === 'internal') { renderSgs(); }
+          if (f === 'name' || f === 'internal') renderFlows();
+          refresh();
+        });
+      });
+      el.querySelector('[data-labels]').hidden = !g.internal;
+      el.querySelector('[data-del]').onclick = () => {
+        if (used && !confirm('Ce groupe est utilisé dans ' + used + ' flux. Supprimer quand même ? Les flux concernés seront aussi supprimés.')) return;
+        S.flows = S.flows.filter(f => f.src !== g.id && f.dst !== g.id);
+        S.sgs.splice(i, 1); renderSgs(); renderFlows(); refresh();
+      };
+      el.dataset.sg = g.id;
+      host.appendChild(el);
+    });
+  }
+
+  function sgOptions(sel) {
+    return '<option value="">— choisir —</option>' + S.sgs.map(g =>
+      '<option value="' + g.id + '"' + (g.id === sel ? ' selected' : '') + '>' + esc(sgLabel(g)) + (g.internal ? ' (interne)' : '') + '</option>').join('');
+  }
+  function renderFlows() {
+    const host = $('flowList');
+    if (!S.flows.length) { host.innerHTML = '<p class="empty">' + (S.sgs.length ? 'Aucun flux. Ajoutez-en un.' : 'Créez d\'abord des security groups (étape 2).') + '</p>'; return; }
+    host.innerHTML = '';
+    S.flows.forEach((f, i) => {
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.dataset.flow = f.id;
+      el.innerHTML =
+        '<div class="item-head"><strong>Flux ' + (i + 1) + '</strong><span>' +
+          '<button type="button" class="small" data-dup title="Dupliquer">Dupliquer</button> ' +
+          '<button type="button" class="danger small" data-del>Supprimer</button></span></div>' +
+        '<div class="flow-line">' +
+          '<label class="field"><span>Source</span><select data-f="src">' + sgOptions(f.src) + '</select></label>' +
+          '<span class="arrow" aria-hidden="true">→</span>' +
+          '<label class="field"><span>Destination</span><select data-f="dst">' + sgOptions(f.dst) + '</select></label>' +
+        '</div>' +
+        '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
+        '<div class="ports-title">Ports</div><div data-ports></div>' +
+        '<button type="button" class="small" data-addport>+ Port</button>' +
+        '<div class="effect" data-effect></div>';
+      el.querySelectorAll('[data-f]').forEach(inp => {
+        const k = inp.dataset.f;
+        if (inp.tagName !== 'SELECT') inp.value = f[k] || '';
+        inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => { f[k] = inp.value; refresh(); });
+      });
+      const ph = el.querySelector('[data-ports]');
+      if (!f.ports.length) ph.innerHTML = '<p class="empty" style="margin:0 0 6px">Aucun port : tous les ports et protocoles.</p>';
+      f.ports.forEach((p, qi) => {
+        const row = document.createElement('div');
+        row.className = 'row port';
+        row.innerHTML = '<select aria-label="Protocole"><option>TCP</option><option>UDP</option><option>SCTP</option></select>' +
+          '<input type="text" placeholder="port (ex. 443)" spellcheck="false" aria-label="Port">' +
+          '<input type="number" min="1" max="65535" placeholder="fin de plage (option.)" aria-label="Fin de plage">' +
+          '<button type="button" class="danger" title="Supprimer le port">✕</button>';
+        const [pr, po, en, del] = row.children;
+        pr.value = p.protocol; po.value = p.port; en.value = p.endPort;
+        po.dataset.port = qi; en.dataset.port = qi;
+        pr.onchange = () => { p.protocol = pr.value; refresh(); };
+        po.oninput = () => { p.port = po.value.trim(); refresh(); };
+        en.oninput = () => { p.endPort = en.value.trim(); refresh(); };
+        del.onclick = () => { f.ports.splice(qi, 1); renderFlows(); refresh(); };
+        ph.appendChild(row);
+      });
+      el.querySelector('[data-addport]').onclick = () => { f.ports.push({ protocol: 'TCP', port: '', endPort: '' }); renderFlows(); refresh(); };
+      el.querySelector('[data-del]').onclick = () => { S.flows.splice(i, 1); renderFlows(); renderSgs(); refresh(); };
+      el.querySelector('[data-dup]').onclick = () => {
+        S.flows.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(f)), id: uid() }); renderFlows(); refresh();
+      };
+      host.appendChild(el);
+    });
+  }
+
+  let objs = [], fullYaml = '';
+  function refresh() {
+    const A = analyse();
+    // Étape 1
+    $('annotPreview').innerHTML = 'Annotation : <code></code>';
+    $('annotPreview').firstElementChild.textContent = 'k8s.v1.cni.cncf.io/policy-for: ' + S.meta.nadNs + '/' + S.meta.nadName;
+    const m = S.meta;
+    $('m_name').classList.toggle('invalid', !!m.name && !(m.name.length <= 200 && DNS_SUB.test(m.name)));
+    $('m_namespace').classList.toggle('invalid', !!m.namespace && !DNS_LABEL.test(m.namespace));
+    $('m_nadNs').classList.toggle('invalid', !!m.nadNs && !DNS_LABEL.test(m.nadNs));
+    $('m_nadName').classList.toggle('invalid', !!m.nadName && !DNS_SUB.test(m.nadName));
+    $('nsRef').textContent = m.namespace || '…';
+    // Étape 2 : marquage
+    document.querySelectorAll('#sgList [data-sg]').forEach(el => {
+      const info = A.sgInfo[el.dataset.sg]; if (!info) return;
+      el.querySelector('[data-f=name]').classList.toggle('invalid', info.badName);
+      el.querySelector('[data-f=ips]').classList.toggle('invalid', info.badIps);
+      el.querySelector('[data-f=labels]').classList.toggle('invalid', info.badLabels);
+    });
+    // Étape 3 : marquage + effet
+    document.querySelectorAll('#flowList [data-flow]').forEach(el => {
+      const fs = A.flowState[el.dataset.flow]; if (!fs) return;
+      el.querySelector('[data-f=src]').classList.toggle('invalid', fs.src);
+      el.querySelector('[data-f=dst]').classList.toggle('invalid', fs.dst);
+      el.querySelectorAll('[data-port]').forEach(inp => inp.classList.toggle('invalid', fs.ports.has(+inp.dataset.port)));
+      el.querySelector('[data-effect]').innerHTML = fs.effects.length
+        ? 'Génère : ' + fs.effects.map(([d, g]) => '<span class="tag ' + d + '">' + (d === 'in' ? 'ingress' : 'egress') + '</span> sur <b>' + esc(g.name) + '</b>').join(' + ')
+        : '';
+    });
+    const showErr = (id, list) => { $(id).innerHTML = list.map(e => '<li>' + esc(e) + '</li>').join(''); };
+    showErr('err1', A.errs[1]); showErr('err2', A.errs[2]); showErr('err3', A.errs[3]);
+    // Étape 4
+    const allErr = [...A.errs[1], ...A.errs[2], ...A.errs[3]];
+    if (!A.pols.length && !allErr.length) allErr.push('Aucune règle à générer : ajoutez au moins un flux impliquant un groupe interne.');
+    showErr('err4', allErr.length ? ['Corrigez ces points avant d\'appliquer le YAML :', ...allErr] : []);
+    showErr('warn4', A.warns);
+    objs = buildYaml(A);
+    fullYaml = objs.map(o => o.text).join('');
+    $('yaml').innerHTML = fullYaml ? highlight(fullYaml) : '<span class="c"># Rien à générer pour le moment</span>';
+    $('polTable').innerHTML = objs.length
+      ? '<thead><tr><th>Objet</th><th>Sens</th><th>Pods ciblés</th><th>Règles</th><th></th></tr></thead><tbody>' +
+        objs.map((o, i) => '<tr><td><code>' + esc(o.name) + '</code></td><td><span class="tag ' + (o.kind === 'ingress' ? 'in' : 'out') + '">' + o.kind + '</span></td><td>' +
+          esc(o.target) + '</td><td>' + (o.rules || 'deny all') + '</td><td><button type="button" class="small" data-copyone="' + i + '">Copier</button></td></tr>').join('') + '</tbody>'
+      : '';
+    // Compteurs / étapes
+    $('sgCount').textContent = S.sgs.length + ' groupe' + (S.sgs.length > 1 ? 's' : '');
+    $('flowCount').textContent = S.flows.length + ' flux';
+    $('polCount').textContent = objs.length + ' objet' + (objs.length > 1 ? 's' : '');
+    document.querySelectorAll('nav.steps button').forEach(b => b.classList.toggle('has-err', (A.errs[b.dataset.step] || []).length > 0));
     save();
   }
 
-  function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
+  function goStep(n) {
+    S.step = n;
+    document.querySelectorAll('[data-panel]').forEach(p => { p.hidden = +p.dataset.panel !== n; });
+    document.querySelectorAll('nav.steps button').forEach(b => {
+      if (+b.dataset.step === n) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+    });
+    save();
+    window.scrollTo({ top: 0 });
+  }
 
-  /* ---------- Événements ---------- */
-  FIELDS.forEach(f => $(f).addEventListener('input', update));
-  ['useIngress', 'useEgress'].forEach(id => $(id).addEventListener('change', () => {
-    const dir = id === 'useIngress' ? 'ingress' : 'egress';
-    if ($(id).checked && !state[dir].length) { state[dir].push(newRule()); renderRules(dir); }
-    update();
-  }));
-  document.querySelectorAll('[data-add-rule]').forEach(b => b.onclick = () => {
-    const dir = b.dataset.addRule; state[dir].push(newRule()); renderRules(dir); update();
-  });
-  $('copyBtn').onclick = async () => {
-    try { await navigator.clipboard.writeText(currentYaml); flash('Copié ✓'); }
+  /* ================= Persistance ================= */
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) {} }
+  function sanitize(d) {
+    const o = blank();
+    if (!d || typeof d !== 'object') return o;
+    const str = (v) => typeof v === 'string' ? v : '';
+    if (d.meta) { META.forEach(k => o.meta[k] = str(d.meta[k])); o.meta.defaultDeny = !!d.meta.defaultDeny; }
+    if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), desc: str(g.desc), ips: str(g.ips), internal: !!g.internal, labels: str(g.labels) }));
+    if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), src: str(f.src), dst: str(f.dst), desc: str(f.desc),
+      ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: ['TCP', 'UDP', 'SCTP'].includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort) })) : [] }));
+    o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
+    return o;
+  }
+  function loadAll(d) { S = sanitize(d); renderMeta(); renderSgs(); renderFlows(); refresh(); goStep(S.step); }
+
+  /* ================= Événements ================= */
+  META.forEach(k => $('m_' + k).addEventListener('input', (e) => { S.meta[k] = e.target.value.trim(); refresh(); }));
+  $('m_defaultDeny').addEventListener('change', (e) => { S.meta.defaultDeny = e.target.checked; refresh(); });
+  document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => goStep(+b.dataset.step));
+  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goStep(+b.dataset.go));
+  $('addSg').onclick = () => {
+    S.sgs.push({ id: uid(), name: '', desc: '', ips: '', internal: !S.sgs.some(g => g.internal), labels: '' });
+    renderSgs(); renderFlows(); refresh();
+    const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
+  };
+  $('addFlow').onclick = () => {
+    S.flows.push({ id: uid(), src: '', dst: '', desc: '', ports: [{ protocol: 'TCP', port: '', endPort: '' }] });
+    renderFlows(); refresh();
+  };
+  function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); flash('Copié ✓'); }
     catch (e) {
-      const ta = document.createElement('textarea'); ta.value = currentYaml; document.body.appendChild(ta);
-      ta.select(); try { document.execCommand('copy'); flash('Copié ✓'); } catch (_) { flash('Copie impossible'); }
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); flash('Copié ✓'); } catch (_) { flash('Copie impossible'); }
       ta.remove();
     }
-  };
-  $('dlBtn').onclick = () => {
-    const blob = new Blob([currentYaml], { type: 'application/x-yaml' });
+  }
+  $('copyBtn').onclick = () => copy(fullYaml);
+  $('polTable').addEventListener('click', (e) => { const b = e.target.closest('[data-copyone]'); if (b) copy(objs[+b.dataset.copyone].text); });
+  function download(name, text, type) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = ($('name').value.trim() || 'multinetworkpolicy') + '.yaml';
-    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  $('dlBtn').onclick = () => download((S.meta.name || 'multinetworkpolicy') + '.yaml', fullYaml, 'application/x-yaml');
+  $('exportBtn').onclick = () => { const { step, ...rest } = S; download((S.meta.name || 'projet') + '.mnp.json', JSON.stringify(rest, null, 2), 'application/json'); };
+  $('importBtn').onclick = () => $('importFile').click();
+  $('importFile').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try { loadAll({ ...JSON.parse(await file.text()), step: 1 }); }
+    catch (err) { alert('Fichier invalide : ' + err.message); }
+    e.target.value = '';
   };
-  $('resetBtn').onclick = () => {
-    if (!confirm('Réinitialiser le formulaire ?')) return;
-    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
-    location.reload();
+  $('resetBtn').onclick = () => { if (confirm('Effacer toute la saisie ?')) loadAll(blank()); };
+
+  // Thème
+  const applyTheme = (t) => { if (t) document.documentElement.setAttribute('data-theme', t); };
+  try { applyTheme(localStorage.getItem('mnp-theme')); } catch (e) {}
+  $('themeBtn').onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    applyTheme(next); try { localStorage.setItem('mnp-theme', next); } catch (e) {}
   };
 
-  load();
-  renderRules('ingress'); renderRules('egress');
-  update();
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) {}
+  loadAll(saved || blank());
 })();
 </script>
 </body>
