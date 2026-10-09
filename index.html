@@ -30,7 +30,7 @@
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; overflow-wrap: anywhere; }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+  .wrap { margin: 0 auto; padding: 0 clamp(16px, 2vw, 32px); }
   header { padding: 20px 0 12px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   header p { margin: 0; color: var(--muted); }
@@ -150,7 +150,7 @@
   .svc-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; }
   @media (max-width: 560px) { .svc-bar { grid-template-columns: 1fr; } }
   .diagram { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); overflow-x: auto; }
-  .diagram svg { display: block; width: 100%; min-width: 640px; height: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 640px; height: auto; max-height: calc(100vh - 120px); }
   .diagram .empty { padding: 24px; margin: 0; }
   .legend { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; font-size: 13px; }
   .legend li { display: flex; gap: 8px; align-items: baseline; }
@@ -1000,9 +1000,11 @@
     });
     const list = Object.values(nodes);
     // Cadre « any » = le network, qui entoure tous les security groups
+    // Marges élargies quand des flux « any » doivent rejoindre le bord du cadre
+    const anyEdges = M.edges.some(e => (e.a === ANY) !== (e.b === ANY)), mSide = anyEdges ? 150 : 40, mBot = anyEdges ? 110 : 40;
     const fr = list.length
-      ? { x0: Math.min(...list.map(d => d.x - d.w / 2)) - 40, x1: Math.max(...list.map(d => d.x + d.w / 2)) + 40,
-          y0: Math.min(...list.map(d => d.y - d.h / 2)) - 80, y1: Math.max(...list.map(d => d.y + d.h / 2)) + 40 }
+      ? { x0: Math.min(...list.map(d => d.x - d.w / 2)) - mSide, x1: Math.max(...list.map(d => d.x + d.w / 2)) + mSide,
+          y0: Math.min(...list.map(d => d.y - d.h / 2)) - 80, y1: Math.max(...list.map(d => d.y + d.h / 2)) + mBot }
       : { x0: G.W / 2 - 260, x1: G.W / 2 + 260, y0: NODE_MIN_Y - 80, y1: NODE_MIN_Y + 120 };
     if (fr.x1 - fr.x0 < GW_W + 340) { const mx = (fr.x0 + fr.x1) / 2; fr.x0 = mx - GW_W / 2 - 170; fr.x1 = mx + GW_W / 2 + 170; }
     const gw = { x: (fr.x0 + fr.x1) / 2, y: fr.y0, w: GW_W, h: NH, label: 'Gateway', sub: m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '(non renseignée)' };
@@ -1039,15 +1041,25 @@
     };
     const pairCount = {}, seen = {}, labels = [];
     M.edges.forEach(e => { if (e.a !== ANY && e.b !== ANY) { const key = [e.a, e.b].sort().join('|'); pairCount[key] = (pairCount[key] || 0) + 1; } });
+    const anyCount = {}, anySeen = {}, anyOut = [];
+    M.edges.forEach(e => { if ((e.a === ANY) !== (e.b === ANY)) { const id = e.a === ANY ? e.b : e.a; anyCount[id] = (anyCount[id] || 0) + 1; } });
     M.edges.forEach(e => {
       const title = '<title>Flux ' + (e.i + 1) + ' : ' + esc(e.lbl) + '</title>';
       if (e.a === ANY || e.b === ANY) {
         if (e.a === ANY && e.b === ANY) return;
-        const nd = nodes[e.a === ANY ? e.b : e.a]; if (!nd) return;
-        const fp = framePoint(nd), bp = edgeBox(nd, fp.x, fp.y);
-        const [s0, s1] = e.a === ANY ? [fp, bp] : [bp, fp];
-        out.push('<line x1="' + s0.x.toFixed(1) + '" y1="' + s0.y.toFixed(1) + '" x2="' + s1.x.toFixed(1) + '" y2="' + s1.y.toFixed(1) + '" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')">' + title + '</line>');
-        labels.push({ x: (s0.x + s1.x) / 2, y: (s0.y + s1.y) / 2, t: e.lbl, c: e.c });
+        const id = e.a === ANY ? e.b : e.a, nd = nodes[id]; if (!nd) return;
+        const fp = framePoint(nd);
+        const horiz = fp.x === fr.x0 || fp.x === fr.x1;
+        // Plusieurs flux any sur le même groupe : flèches parallèles
+        const k = (anySeen[id] = (anySeen[id] || 0) + 1) - 1, off = (k - (anyCount[id] - 1) / 2) * (horiz ? 24 : 30);
+        const f2 = horiz ? { x: fp.x, y: fp.y + off } : { x: fp.x + off, y: fp.y };
+        const toward = horiz ? { x: fp.x, y: nd.y + off } : { x: nd.x + off, y: fp.y };
+        const b0 = edgeBox(nd, toward.x, toward.y), bp = horiz ? { x: b0.x, y: nd.y + off } : { x: nd.x + off, y: b0.y };
+        const [s0, s1] = e.a === ANY ? [f2, bp] : [bp, f2];
+        anyOut.push('<line x1="' + s0.x.toFixed(1) + '" y1="' + s0.y.toFixed(1) + '" x2="' + s1.x.toFixed(1) + '" y2="' + s1.y.toFixed(1) + '" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')">' + title + '</line>');
+        // Libellé à côté de la flèche, pour ne jamais la masquer
+        const t = trunc(e.lbl, 22), w = t.length * 6.6 + 12, mx = (s0.x + s1.x) / 2, my = (s0.y + s1.y) / 2;
+        labels.push(horiz ? { x: mx, y: my + (off > 0 ? 13 : -13), t, c: e.c, full: e.lbl } : { x: mx + w / 2 + 8, y: my, t, c: e.c, full: e.lbl });
         return;
       }
       const A = nodes[e.a], B = nodes[e.b]; if (!A || !B) return;
@@ -1060,6 +1072,7 @@
         '" fill="none" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')">' + title + '</path>');
       labels.push({ x: 0.25 * s0.x + 0.5 * mx + 0.25 * s1.x, y: 0.25 * s0.y + 0.5 * my + 0.25 * s1.y, t: e.lbl, c: e.c });
     });
+    out.push(...anyOut);
     const drawNode = (nd, o = {}) => {
       out.push('<g' + (o.drag ? ' data-node="' + esc(nd.id) + '" style="cursor:grab;touch-action:none"' : '') + (nd.dim ? ' opacity=".5"' : '') + '><title>' +
         esc(nd.label + (nd.sub ? ' — ' + nd.sub : '') + (o.drag ? ' (glisser pour déplacer)' : '')) + '</title>' +
@@ -1084,7 +1097,8 @@
         tx(l.x, l.y + 4, t, { size: 11, weight: 600, fill: l.c }) + '</g>');
     });
     // Le SVG reste le même élément pendant un glisser-déposer
-    const top = ext.y - NH / 2 - 20, H = fr.y1 + 30;
+    // Cadrage fixe (bornes de déplacement des groupes) : l'échelle ne change pas après un glisser-déposer
+    const top = Math.min(NODE_MIN_Y - NH - 80 - 125 - 20, ext.y - NH / 2 - 20), H = Math.max(G.H - 40 + mBot + 30, fr.y1 + 30);
     if (!dgSvg || !dgSvg.isConnected) {
       $('diagram').innerHTML = '';
       dgSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1107,8 +1121,9 @@
   }
   function bindDrag(svg) {
     const pt = (e) => {
-      const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-      return { x: vb.x + (e.clientX - r.left) * vb.width / r.width, y: vb.y + (e.clientY - r.top) * vb.height / r.height };
+      const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+      const q = p.matrixTransform(svg.getScreenCTM().inverse());
+      return { x: q.x, y: q.y };
     };
     svg.addEventListener('pointerdown', (e) => {
       const g = e.target.closest('[data-node]'); if (!g || e.button > 0) return;
