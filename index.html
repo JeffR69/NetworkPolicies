@@ -987,7 +987,7 @@
     });
   }
 
-  let dgSvg = null, drag = null;
+  let dgSvg = null, drag = null, dgView = null;
   function renderDiagram() {
     const css = getComputedStyle(document.documentElement);
     const C = (v) => css.getPropertyValue(v).trim();
@@ -999,7 +999,17 @@
     }
     if (M.sgs.some(g => !S.layout[g.id])) autoLayout(true);
     const G = geometry(n);
-    const clampX = (x) => Math.min(Math.max(x, NW / 2 + 30), G.W - NW / 2 - 30);
+    // Marges élargies quand des flux « any » doivent rejoindre le bord du cadre
+    const anyEdges = M.edges.some(e => (e.a === ANY) !== (e.b === ANY)), mSide = anyEdges ? 150 : 40, mBot = anyEdges ? 110 : 40;
+    // Zone visible : hauteur fixe (bornes de déplacement), largeur étendue au format du conteneur pour remplir la page.
+    // Elle ne change pas pendant un glisser-déposer, pour que l'échelle reste stable.
+    const top = NODE_MIN_Y - NH - 80 - 125 - 20, vbH = G.H - 40 + mBot + 30 - top;
+    if (!drag || !dgView) {
+      const cw = Math.max($('diagram').clientWidth || 0, 640), ch = Math.max(window.innerHeight - 120, 320);
+      const w = Math.max(G.W, vbH * cw / ch);
+      dgView = { x: -(w - G.W) / 2, w, top, h: vbH };
+    }
+    const clampX = (x) => Math.min(Math.max(x, dgView.x + NW / 2 + 30), dgView.x + dgView.w - NW / 2 - 30);
     const clampY = (y) => Math.min(Math.max(y, NODE_MIN_Y), G.H - NH / 2 - 40);
     const nodes = {};
     M.sgs.forEach(g => {
@@ -1009,8 +1019,6 @@
     });
     const list = Object.values(nodes);
     // Cadre « any » = le network, qui entoure tous les security groups
-    // Marges élargies quand des flux « any » doivent rejoindre le bord du cadre
-    const anyEdges = M.edges.some(e => (e.a === ANY) !== (e.b === ANY)), mSide = anyEdges ? 150 : 40, mBot = anyEdges ? 110 : 40;
     const fr = list.length
       ? { x0: Math.min(...list.map(d => d.x - d.w / 2)) - mSide, x1: Math.max(...list.map(d => d.x + d.w / 2)) + mSide,
           y0: Math.min(...list.map(d => d.y - d.h / 2)) - 80, y1: Math.max(...list.map(d => d.y + d.h / 2)) + mBot }
@@ -1024,7 +1032,7 @@
       '" font-weight="' + (o.weight || 400) + '" fill="' + (o.fill || col.text) + '"' + (o.mono ? ' font-family="ui-monospace, Menlo, Consolas, monospace"' : '') + '>' + esc(str) + '</text>';
     const markers = FLOW_COLORS.concat([col.ok]).map((c, k) => '<marker id="ar' + k + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="' + c + '"/></marker>').join('');
     out.push('<defs>' + markers + '</defs>');
-    out.push('<rect width="100%" height="100%" fill="' + col.panel2 + '"/>');
+    out.push('<rect x="' + dgView.x.toFixed(1) + '" y="' + dgView.top + '" width="' + dgView.w.toFixed(1) + '" height="' + dgView.h + '" fill="' + col.panel2 + '"/>');
     out.push('<rect x="' + fr.x0.toFixed(1) + '" y="' + fr.y0.toFixed(1) + '" width="' + (fr.x1 - fr.x0).toFixed(1) + '" height="' + (fr.y1 - fr.y0).toFixed(1) +
       '" rx="14" fill="' + col.panel + '" stroke="' + col.ok + '" stroke-width="2" stroke-dasharray="8 5"/>');
     out.push(tx(fr.x0 + 14, fr.y0 + 50, 'any · network ' + (m.network || '') + (m.ng ? ' · ' + NET_LABEL + ': ' + m.ng : ''), { anchor: 'start', size: 12, weight: 700, fill: col.ok }));
@@ -1106,8 +1114,6 @@
         tx(l.x, l.y + 4, t, { size: 11, weight: 600, fill: l.c }) + '</g>');
     });
     // Le SVG reste le même élément pendant un glisser-déposer
-    // Cadrage fixe (bornes de déplacement des groupes) : l'échelle ne change pas après un glisser-déposer
-    const top = Math.min(NODE_MIN_Y - NH - 80 - 125 - 20, ext.y - NH / 2 - 20), H = Math.max(G.H - 40 + mBot + 30, fr.y1 + 30);
     if (!dgSvg || !dgSvg.isConnected) {
       $('diagram').innerHTML = '';
       dgSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1116,7 +1122,7 @@
       bindDrag(dgSvg);
       $('diagram').appendChild(dgSvg);
     }
-    if (!drag) dgSvg.setAttribute('viewBox', '0 ' + top.toFixed(0) + ' ' + G.W.toFixed(0) + ' ' + (H - top).toFixed(0));
+    dgSvg.setAttribute('viewBox', dgView.x.toFixed(1) + ' ' + dgView.top + ' ' + dgView.w.toFixed(1) + ' ' + dgView.h);
     dgSvg.innerHTML = out.join('');
 
     const legend = [];
@@ -1143,7 +1149,7 @@
     svg.addEventListener('pointermove', (e) => {
       if (!drag) return;
       const p = pt(e), G = geometry(S.sgs.filter(g => g.name).length);
-      S.layout[drag.id] = { x: Math.round(Math.min(Math.max(p.x - drag.dx, NW / 2 + 30), G.W - NW / 2 - 30)),
+      S.layout[drag.id] = { x: Math.round(Math.min(Math.max(p.x - drag.dx, dgView.x + NW / 2 + 30), dgView.x + dgView.w - NW / 2 - 30)),
         y: Math.round(Math.min(Math.max(p.y - drag.dy, NODE_MIN_Y), G.H - NH / 2 - 40)) };
       renderDiagram();
     });
@@ -1151,6 +1157,11 @@
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', end);
   }
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (S.step === 5 && !drag) renderDiagram(); }, 120);
+  });
   $('relayoutBtn').onclick = () => { S.layout = {}; autoLayout(false); renderDiagram(); save(); };
   $('svgBtn').onclick = () => {
     if (!dgSvg) return;
