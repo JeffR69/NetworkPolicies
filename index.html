@@ -115,8 +115,9 @@
   .prefixed .pfx:not(:empty) + input { border-radius: 0 6px 6px 0; }
   code.selector { display: block; padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel); }
   .tag.ns { color: var(--ok); }
-  .flow-type { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .flow-type select { width: auto; padding: 4px 8px; font-size: 13px; }
+  .nsbox { display: flex; gap: 10px; align-items: flex-start; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: pointer; }
+  .nsbox input { margin-top: 3px; }
+  .nsbox:has(input:checked) { border-color: var(--ok); }
   .fixed-peers { font-size: 12px; color: var(--muted); margin-top: 8px; }
 
   /* Liste déroulante avec recherche (simple ou multiple) */
@@ -221,15 +222,17 @@
 <!-- ÉTAPE 3 -->
 <section class="card" data-panel="3" hidden>
   <h2>3. Flux autorisés</h2>
-  <p class="lead">Est/Ouest : entre security groups (un ingress et un egress séparés).
-    Nord/Sud : vers l'extérieur et la gateway du network (un seul objet ingress + egress).</p>
+  <label class="nsbox"><input type="checkbox" id="nsToggle">
+    <span><b>Autoriser le flux Nord/Sud</b> (source any, destination any)
+      <span class="hint" style="display:block">Tout le network peut joindre et être joint par l'extérieur (<code>0.0.0.0/0</code> sauf <code data-net></code>)
+      et la gateway <code data-gw></code>. Un seul objet ingress + egress, tous ports.</span></span></label>
+  <p class="lead">Flux Est/Ouest entre security groups : un ingress et un egress dans deux objets séparés.</p>
   <div id="flowList"></div>
   <ul class="msgs err" id="err3"></ul>
   <div class="navbtns">
     <button type="button" data-go="2">← Security groups</button>
     <span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-      <button type="button" id="addFlow">+ Flux Est/Ouest</button>
-      <button type="button" id="addNs">+ Flux Nord/Sud</button>
+      <button type="button" id="addFlow">+ Ajouter un flux</button>
       <button type="button" class="primary" data-go="4">Générer le YAML →</button>
     </span>
   </div>
@@ -239,7 +242,7 @@
 <section class="card" data-panel="4" hidden>
   <h2>4. YAML généré</h2>
   <p class="lead">Est/Ouest : un ingress sur la destination et un egress sur la source, dans deux objets distincts.
-    Nord/Sud : un seul objet avec ingress et egress.</p>
+    Nord/Sud (si coché) : un seul objet avec ingress et egress.</p>
   <ul class="msgs err" id="err4"></ul>
   <ul class="msgs warn" id="warn4"></ul>
   <div class="table-wrap"><table id="polTable"></table></div>
@@ -269,7 +272,7 @@
   const PROTOS = ['TCP', 'UDP', 'SCTP'];
 
   const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
-  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, sgs: [], flows: [], step: 1 });
+  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, ns: false, sgs: [], flows: [], step: 1 });
   let S = blank();
 
   /* ================= Services prédéfinis ================= */
@@ -391,7 +394,7 @@
     const ng = S.meta.ng ? S.meta.ng + '-' : '';
     const apps = [...new Set(p.apps)];
     const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
-    if (p.dir === 'both') return ng + sideName(p.src) + '-north-south' + suffix;
+    if (p.dir === 'both') return ng + 'north-south';
     return p.dir === 'ingress'
       ? ng + sideName(p.dst) + '-ingress-from-' + sideName(p.src) + suffix
       : ng + sideName(p.src) + '-egress-to-' + sideName(p.dst) + suffix;
@@ -445,8 +448,7 @@
     const pols = [];
     const flowState = {};
     S.flows.forEach((f, i) => {
-      const ns = f.type === 'ns';
-      const where = (ns ? 'Flux Nord/Sud ' : 'Flux ') + (i + 1);
+      const where = 'Flux ' + (i + 1);
       const fe = { src: false, dst: false, ports: new Set(), effects: [] };
       flowState[f.id] = fe;
       const src = side(f.src), dst = side(f.dst);
@@ -460,19 +462,9 @@
       let ok = true;
       const err = (msg, key) => { errs[3].push(where + ' : ' + msg); if (key) fe[key] = true; ok = false; };
       const mk = (dir, target, peers) => {
-        const pol = { dir, target, src, dst, flow: f, idx: i + 1, peers, ports, apps, ns };
+        const pol = { dir, target, src, dst, flow: f, idx: i + 1, peers, ports, apps };
         pol.name = polName(pol); pols.push(pol); fe.effects.push(pol);
       };
-      if (ns) {
-        if (isEmpty(src)) err('choisissez au moins un security group (ou any).', 'src');
-        if (!net) err('renseignez un Network valide à l\'étape 1.');
-        if (!gw) err('renseignez une Gateway valide à l\'étape 1.');
-        if (src.any && !m.ng) err('« any » nécessite un Network Group (étape 1).', 'src');
-        if (!ok) return;
-        if (!ports.length) warns.push(where + ' (' + sideLabel(src) + ') : aucun port, tous les ports et protocoles sont autorisés vers et depuis l\'extérieur.');
-        mk('both', src, [{ cidr: '0.0.0.0/0', except: [net.cidr] }, { cidr: gw + '/32' }]);
-        return;
-      }
       if (isEmpty(src)) err('choisissez au moins une source.', 'src');
       if (isEmpty(dst)) err('choisissez au moins une destination.', 'dst');
       if ((src.any || dst.any) && !net) err('« any » nécessite un Network valide (étape 1).', src.any ? 'src' : 'dst');
@@ -484,6 +476,22 @@
       if (!inPeers.length) err('les sources n\'ont aucune IP valide.', 'src'); else mk('ingress', dst, inPeers);
       if (!outPeers.length) err('les destinations n\'ont aucune IP valide.', 'dst'); else mk('egress', src, outPeers);
     });
+
+    // Règle Nord/Sud unique : any <-> extérieur + gateway
+    if (S.ns) {
+      const nerr = [];
+      if (!m.ng) nerr.push('renseignez le Network Group (étape 1).');
+      if (!net) nerr.push('renseignez un Network valide (étape 1).');
+      if (!gw) nerr.push('renseignez une Gateway valide (étape 1).');
+      nerr.forEach(e => errs[3].push('Flux Nord/Sud : ' + e));
+      if (!nerr.length) {
+        const any = { any: true, groups: [] };
+        const pol = { dir: 'both', target: any, src: any, dst: any, flow: { desc: '' }, idx: 'N/S', ports: [], apps: [],
+          peers: [{ cidr: '0.0.0.0/0', except: [net.cidr] }, { cidr: gw + '/32' }] };
+        pol.name = polName(pol);
+        pols.unshift(pol);
+      }
+    }
 
     S.sgs.forEach(g => {
       if (!S.flows.some(f => f.src.includes(g.id) || f.dst.includes(g.id)))
@@ -521,16 +529,11 @@
   }
   function podSelector(L, sd) {
     L.push('  podSelector:');
-    if (sd.any) {
-      L.push('    matchLabels:');
-      L.push('      ' + NET_LABEL + ': ' + JSON.stringify(S.meta.ng));
-      return;
-    }
     L.push('    matchExpressions:');
-    L.push('      - key: ' + SG_LABEL);
+    L.push('      - key: ' + (sd.any ? NET_LABEL : SG_LABEL));
     L.push('        operator: In');
     L.push('        values:');
-    sd.groups.forEach(g => L.push('          - ' + fullName(g)));
+    (sd.any ? [S.meta.ng] : sd.groups.map(fullName)).forEach(v => L.push('          - ' + q(v)));
   }
   function rule(L, kw, peers, ports) {
     L.push('    - ' + kw + ':');
@@ -549,14 +552,14 @@
       });
     }
   }
-  const targetText = (sd) => sd.any ? NET_LABEL + '=' + S.meta.ng : SG_LABEL + ' in (' + sd.groups.map(fullName).join(', ') + ')';
+  const targetText = (sd) => sd.any ? NET_LABEL + ' in (' + S.meta.ng + ')' : SG_LABEL + ' in (' + sd.groups.map(fullName).join(', ') + ')';
 
   function buildYaml(A) {
     const objs = [];
     for (const p of A.pols) {
       const l = [];
       const desc = p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '';
-      header(l, p.name, p.ns ? 'Flux ' + p.idx + ' Nord/Sud : ' + sideLabel(p.src) + ' ↔ extérieur + gateway' + desc
+      header(l, p.name, p.dir === 'both' ? 'Flux Nord/Sud : network ' + S.meta.ng + ' ↔ extérieur + gateway'
         : 'Flux ' + p.idx + ' : ' + sideLabel(p.src) + ' → ' + sideLabel(p.dst) + desc);
       podSelector(l, p.target);
       l.push('  policyTypes:');
@@ -718,31 +721,23 @@
     if (!S.flows.length) { host.innerHTML = '<p class="empty">' + (S.sgs.length ? 'Aucun flux. Ajoutez-en un.' : 'Créez d\'abord des security groups (étape 2).') + '</p>'; return; }
     host.innerHTML = '';
     S.flows.forEach((f, i) => {
-      const ns = f.type === 'ns';
       const el = document.createElement('div');
       el.className = 'item';
       el.dataset.flow = f.id;
       el.innerHTML =
-        '<div class="item-head"><span class="flow-type"><strong>Flux ' + (i + 1) + '</strong>' +
-          '<select data-type aria-label="Type de flux"><option value="ew">Est/Ouest</option><option value="ns">Nord/Sud</option></select></span><span>' +
+        '<div class="item-head"><strong>Flux ' + (i + 1) + '</strong><span>' +
           '<button type="button" class="small" data-dup title="Dupliquer">Dupliquer</button> ' +
           '<button type="button" class="danger small" data-del>Supprimer</button></span></div>' +
-        (ns
-          ? '<div class="field"><span class="flabel">Security groups concernés</span><div data-pk="src"></div>' +
-            '<div class="fixed-peers">Autorise ces pods à joindre et à être joints par l\'extérieur (<code>0.0.0.0/0</code> sauf <code data-net></code>) et la gateway <code data-gw></code>.</div></div>'
-          : '<div class="flow-line">' +
-              '<div class="field"><span class="flabel">Source(s)</span><div data-pk="src"></div></div>' +
-              '<span class="arrow" aria-hidden="true">→</span>' +
-              '<div class="field"><span class="flabel">Destination(s)</span><div data-pk="dst"></div></div>' +
-            '</div>') +
+        '<div class="flow-line">' +
+          '<div class="field"><span class="flabel">Source(s)</span><div data-pk="src"></div></div>' +
+          '<span class="arrow" aria-hidden="true">→</span>' +
+          '<div class="field"><span class="flabel">Destination(s)</span><div data-pk="dst"></div></div>' +
+        '</div>' +
         '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
         '<div class="ports-title">Services</div>' +
         '<div class="svc-bar"><div data-svc></div><button type="button" class="small" data-addport>+ Port manuel</button></div>' +
         '<div data-ports></div>' +
         '<div class="effect" data-effect></div>';
-      const sel = el.querySelector('[data-type]');
-      sel.value = ns ? 'ns' : 'ew';
-      sel.onchange = () => { f.type = sel.value; if (f.type === 'ns') f.dst = []; renderFlows(); refresh(); };
       ['src', 'dst'].forEach(key => {
         const slot = el.querySelector('[data-pk=' + key + ']'); if (!slot) return;
         const pk = picker({
@@ -819,12 +814,13 @@
       el.querySelector('[data-sel]').textContent = SG_LABEL + ': ' + (g && g.name ? fullName(g) : '…');
     });
     // Étape 3
+    $('nsToggle').checked = !!S.ns;
+    document.querySelectorAll('[data-net]').forEach(n => { n.textContent = m.network || '<network>'; });
+    document.querySelectorAll('[data-gw]').forEach(n => { n.textContent = m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '<gateway>'; });
     document.querySelectorAll('#flowList [data-flow]').forEach(el => {
       const fs = A.flowState[el.dataset.flow]; if (!fs) return;
       ['src', 'dst'].forEach(k => { const b = el.querySelector('[data-box=' + k + ']'); if (b) b.classList.toggle('invalid', fs[k]); });
       el.querySelectorAll('[data-port]').forEach(inp => inp.classList.toggle('invalid', fs.ports.has(+inp.dataset.port)));
-      const n = el.querySelector('[data-net]'); if (n) n.textContent = m.network || '<network>';
-      const gwEl = el.querySelector('[data-gw]'); if (gwEl) gwEl.textContent = m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '<gateway>';
       el.querySelector('[data-effect]').innerHTML = fs.effects.length
         ? 'Génère : ' + fs.effects.map(p => '<span class="tag ' + (p.dir === 'both' ? 'ns' : p.dir === 'ingress' ? 'in' : 'out') + '">' +
           (p.dir === 'both' ? 'ingress + egress' : p.dir) + '</span> <code>' + esc(p.name) + '</code>').join(' ')
@@ -847,7 +843,7 @@
           '</td><td><button type="button" class="small" data-copyone="' + i + '">Copier</button></td></tr>').join('') + '</tbody>'
       : '';
     $('sgCount').textContent = S.sgs.length + ' groupe' + (S.sgs.length > 1 ? 's' : '');
-    $('flowCount').textContent = S.flows.length + ' flux';
+    $('flowCount').textContent = S.flows.length + ' flux' + (S.ns ? ' + Nord/Sud' : '');
     $('polCount').textContent = objs.length + ' objet' + (objs.length > 1 ? 's' : '');
     document.querySelectorAll('nav.steps button').forEach(b => b.classList.toggle('has-err', (A.errs[b.dataset.step] || []).length > 0));
     save();
@@ -872,8 +868,9 @@
     const ids = (v) => Array.isArray(v) ? v.filter(x => typeof x === 'string') : (typeof v === 'string' && v ? [v] : []);
     if (d.meta) META.forEach(k => o.meta[k] = str(d.meta[k]));
     if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), ips: str(g.ips) }));
-    if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), type: f.type === 'ns' ? 'ns' : 'ew',
-      src: ids(f.src), dst: f.type === 'ns' ? [] : ids(f.dst), desc: str(f.desc),
+    o.ns = !!d.ns || (Array.isArray(d.flows) && d.flows.some(f => f && f.type === 'ns'));
+    if (Array.isArray(d.flows)) o.flows = d.flows.filter(f => f && f.type !== 'ns').map(f => ({ id: str(f.id) || uid(),
+      src: ids(f.src), dst: ids(f.dst), desc: str(f.desc),
       ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: PROTOS.includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
     o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
     return o;
@@ -889,9 +886,8 @@
     renderSgs(); renderFlows(); refresh();
     const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
   };
-  const newFlow = (type) => { S.flows.push({ id: uid(), type, src: [], dst: [], desc: '', ports: [] }); renderFlows(); refresh(); };
-  $('addFlow').onclick = () => newFlow('ew');
-  $('addNs').onclick = () => newFlow('ns');
+  $('addFlow').onclick = () => { S.flows.push({ id: uid(), src: [], dst: [], desc: '', ports: [] }); renderFlows(); refresh(); };
+  $('nsToggle').addEventListener('change', (e) => { S.ns = e.target.checked; refresh(); });
   function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); flash('Copié ✓'); }
