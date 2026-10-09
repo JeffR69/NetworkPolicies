@@ -114,6 +114,10 @@
     border-radius: 6px 0 0 6px; background: var(--panel); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prefixed .pfx:empty { display: none; }
   .prefixed .pfx:not(:empty) + input { border-radius: 0 6px 6px 0; }
+  .prefixed .sfx { flex: none; display: flex; align-items: center; padding: 0 8px; border: 1px solid var(--border); border-left: none;
+    border-radius: 0 6px 6px 0; background: var(--panel-2); color: var(--muted); font-size: 12px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prefixed .sfx:empty { display: none; }
+  .prefixed input:has(+ .sfx:not(:empty)) { border-radius: 6px 0 0 6px; }
   code.selector { display: block; padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel); }
   .tag.ns { color: var(--ok); }
   .off { opacity: .4; }
@@ -203,7 +207,10 @@
       <input type="text" id="m_ng" spellcheck="false" placeholder="ex. mon-ng">
       <div class="hint">Préfixe des security groups et des policies. Valeur du label <code>neos/vm.dfw-network</code> utilisé pour « any ».</div>
     </label>
-    <span></span>
+    <label class="field"><span>Administrateur</span>
+      <input type="text" id="m_admin" spellcheck="false" autocomplete="name" placeholder="ex. Prénom Nom">
+      <div class="hint">Personne qui réalise l'opération. Ajouté, avec la date et l'heure, à la description de chaque flux créé ou modifié.</div>
+    </label>
     <label class="field"><span>Network</span>
       <input type="text" id="m_network" spellcheck="false" placeholder="ex. 192.0.2.0/24">
       <div class="hint">CIDR du réseau. Utilisé pour « any » et pour l'exception des flux Nord/Sud.</div>
@@ -304,8 +311,8 @@
   const NA_SEP = '-';
   const PROTOS = ['TCP', 'UDP', 'SCTP'];
 
-  const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
-  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, ns: false, nsGw: true, sgs: [], flows: [], layout: {}, step: 1 });
+  const META = ['namespace', 'nadName', 'ng', 'network', 'gateway', 'admin'];
+  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '', admin: '' }, ns: false, nsGw: true, sgs: [], flows: [], layout: {}, step: 1 });
   let S = blank();
 
   /* ================= Services prédéfinis ================= */
@@ -440,6 +447,7 @@
     const m = S.meta;
     if (!m.namespace || m.namespace.length > 63 || !DNS_LABEL.test(m.namespace)) errs[1].push('Namespace invalide (DNS-1123, 63 car. max).');
     if (!m.nadName || !DNS_SUB.test(m.nadName)) errs[1].push('Nom de la NAD invalide.');
+    if (!m.admin) warns1.push('Renseignez l\'administrateur : il est ajouté à la description des flux.');
     if (m.ng && (m.ng.length > 40 || !DNS_LABEL.test(m.ng))) errs[1].push('Network Group invalide (minuscules, chiffres, « - », 40 car. max).');
     let net = null, gw = null;
     const bad = { network: false, gateway: false };
@@ -603,8 +611,8 @@
     const objs = [];
     for (const p of A.pols) {
       const l = [];
-      const desc = p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '';
-      header(l, p.name, p.self ? 'Flux ' + p.idx + ' : allow-self ' + sideLabel(p.src) + ' ↔ ' + sideLabel(p.src) + ' (tous ports)'
+      const fd = p.dir === 'both' && !p.self ? '' : fullDesc(p.flow), desc = fd ? ' — ' + fd : '';
+      header(l, p.name, p.self ? 'Flux ' + p.idx + ' : allow-self ' + sideLabel(p.src) + ' ↔ ' + sideLabel(p.src) + ' (tous ports)' + desc
         : p.dir === 'both' ? 'Flux Nord/Sud : network ' + S.meta.ng + ' ↔ extérieur + gateway'
         : 'Flux ' + p.idx + ' : ' + sideLabel(p.src) + ' → ' + sideLabel(p.dst) + desc);
       podSelector(l, p.target);
@@ -745,13 +753,19 @@
     return [{ value: ANY, label: 'any', sub: 'tout le network' + (S.meta.network ? ' ' + S.meta.network : '') }]
       .concat(S.sgs.map(g => ({ value: g.id, label: sgLabel(g), sub: splitList(g.ips).slice(0, 3).join(', ') + (splitList(g.ips).length > 3 ? '…' : '') })));
   }
+  // Suffixe de description : « <administrateur> - <date et heure> » de la dernière modification du flux
+  const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
+  const descSuffix = (f) => f.at ? (f.by ? f.by + ' - ' : '') + fmtDate(f.at) : '';
+  const fullDesc = (f) => [oneLine(f.desc || '').trim(), descSuffix(f)].filter(Boolean).join(' — ');
+  function touch(f) { f.by = S.meta.admin || ''; f.at = new Date().toISOString(); }
   // « any » est exclusif : il remplace les groupes, et un groupe remplace « any »
   function toggleSide(f, key, v) {
     const cur = f[key];
     if (cur.includes(v)) f[key] = cur.filter(x => x !== v);
     else if (v === ANY || (f.self && key === 'src')) f[key] = [v];
     else { const keep = cur.filter(x => x !== ANY); f[key] = S.sgs.map(g => g.id).filter(id => id === v || keep.includes(id)); }
-    renderSgs(); refresh();
+    touch(f); renderSgs(); refresh();
+    const sfx = document.querySelector('#flowList [data-flow="' + f.id + '"] [data-sfx]'); if (sfx) sfx.textContent = descSuffix(f);
   }
   function addService(f, name) {
     const svc = allServices().find(s => s.name === name); if (!svc) return;
@@ -760,7 +774,7 @@
       if (!f.ports.some(p => p.protocol === protocol && p.port === port && p.endPort === endPort && p.app === svc.name))
         f.ports.push({ protocol, port, endPort, app: svc.name });
     });
-    renderFlows(); refresh();
+    touch(f); renderFlows(); refresh();
   }
 
   function renderFlows() {
@@ -782,7 +796,7 @@
           '<div class="field" data-lock><span class="flabel">Destination(s)</span><div data-pk="dst"></div></div>' +
         '</div>' +
         '<div data-lock>' +
-          '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
+          '<label class="field" style="margin-top:10px"><span>Description</span><span class="prefixed"><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"><span class="sfx" data-sfx></span></span></label>' +
           '<div class="ports-title">Services</div>' +
           '<div class="svc-bar"><div data-svc></div><button type="button" class="small" data-addport>+ Port manuel</button></div>' +
           '<div data-ports></div>' +
@@ -805,10 +819,13 @@
       }).el);
       const selfCb = el.querySelector('[data-self]');
       selfCb.checked = !!f.self;
-      selfCb.onchange = () => { f.self = selfCb.checked; renderFlows(); refresh(); };
+      selfCb.onchange = () => { f.self = selfCb.checked; touch(f); renderFlows(); refresh(); };
+      // Toute saisie dans le flux met à jour l'auteur et la date de modification
+      ['input', 'change'].forEach(ev => el.addEventListener(ev, (e) => { if (e.target.closest('[data-ports], [data-f=desc]')) { touch(f); el.querySelector('[data-sfx]').textContent = descSuffix(f); } }));
       el.querySelectorAll('[data-lock]').forEach(x => { x.inert = !!f.self; x.classList.toggle('off', !!f.self); });
       const d = el.querySelector('[data-f=desc]');
       d.value = f.desc || '';
+      el.querySelector('[data-sfx]').textContent = descSuffix(f);
       d.addEventListener('input', () => { f.desc = d.value; refresh(); });
 
       const ph = el.querySelector('[data-ports]');
@@ -829,7 +846,7 @@
         en.oninput = () => { p.endPort = en.value.trim(); refresh(); };
         ap.oninput = () => { p.app = ap.value.trim(); refresh(); };
         [po, en, ap].forEach(x => x.addEventListener('change', () => learnService(p)));
-        del.onclick = () => { f.ports.splice(qi, 1); renderFlows(); refresh(); };
+        del.onclick = () => { f.ports.splice(qi, 1); touch(f); renderFlows(); refresh(); };
         ph.appendChild(row);
       });
       el.querySelector('[data-addport]').onclick = () => {
@@ -839,7 +856,8 @@
       };
       el.querySelector('[data-del]').onclick = () => { S.flows.splice(i, 1); renderFlows(); renderSgs(); refresh(); };
       el.querySelector('[data-dup]').onclick = () => {
-        S.flows.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(f)), id: uid() }); renderFlows(); renderSgs(); refresh();
+        const c = { ...JSON.parse(JSON.stringify(f)), id: uid() }; touch(c);
+        S.flows.splice(i + 1, 0, c); renderFlows(); renderSgs(); refresh();
       };
       host.appendChild(el);
     });
@@ -1130,7 +1148,7 @@
     M.flows.forEach(x => {
       const what = x.f.self ? sideLabel(x.src) + ' (allow-self, pastille « self »)' : sideLabel(x.src) + ' → ' + sideLabel(x.dst);
       legend.push('<li><span class="sw" style="background:' + (x.f.self ? col.ok : FLOW_COLORS[x.i % FLOW_COLORS.length]) + '"></span><span><b>Flux ' + (x.i + 1) + '</b> : ' + esc(what) +
-        ' — ' + esc(x.f.self ? 'tous ports' : flowLabel(x.f)) + (x.f.desc ? ' <span class="hint">(' + esc(x.f.desc) + ')</span>' : '') + '</span></li>');
+        ' — ' + esc(x.f.self ? 'tous ports' : flowLabel(x.f)) + (fullDesc(x.f) ? ' <span class="hint">(' + esc(fullDesc(x.f)) + ')</span>' : '') + '</span></li>');
     });
     $('legend').innerHTML = legend.join('') || '<li class="hint">Aucun flux complet à afficher.</li>';
   }
@@ -1192,7 +1210,7 @@
     o.nsGw = d.nsGw !== false;
     o.ns = !!d.ns || (Array.isArray(d.flows) && d.flows.some(f => f && f.type === 'ns'));
     if (Array.isArray(d.flows)) o.flows = d.flows.filter(f => f && f.type !== 'ns').map(f => ({ id: str(f.id) || uid(),
-      src: ids(f.src), dst: ids(f.dst), desc: str(f.desc), self: !!f.self,
+      src: ids(f.src), dst: ids(f.dst), desc: str(f.desc), self: !!f.self, by: str(f.by), at: str(f.at),
       ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: PROTOS.includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
     if (d.layout && typeof d.layout === 'object') Object.entries(d.layout).forEach(([k, v]) => {
       if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) o.layout[k] = { x: v.x, y: v.y };
@@ -1211,7 +1229,7 @@
     renderSgs(); renderFlows(); refresh();
     const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
   };
-  $('addFlow').onclick = () => { S.flows.push({ id: uid(), src: [], dst: [], desc: '', ports: [] }); renderFlows(); refresh(); };
+  $('addFlow').onclick = () => { const f = { id: uid(), src: [], dst: [], desc: '', ports: [] }; touch(f); S.flows.push(f); renderFlows(); refresh(); };
   $('nsToggle').addEventListener('change', (e) => { S.ns = e.target.checked; refresh(); });
   $('nsGwToggle').addEventListener('change', (e) => { S.nsGw = e.target.checked; refresh(); });
   function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
