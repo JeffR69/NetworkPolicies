@@ -30,7 +30,7 @@
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; overflow-wrap: anywhere; }
-  .wrap { margin: 0 auto; padding: 0 clamp(16px, 2vw, 32px); }
+  .wrap { margin: 0 auto; padding: 8px clamp(16px, 4vw, 72px) 24px; }
   header { padding: 20px 0 12px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   header p { margin: 0; color: var(--muted); }
@@ -121,7 +121,11 @@
   .selfbox:has(input:checked) { border-color: var(--ok); color: var(--ok); }
   .nsbox { display: flex; gap: 10px; align-items: flex-start; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: pointer; }
   .nsbox input { margin-top: 3px; }
-  .nsbox:has(input:checked) { border-color: var(--ok); }
+  .nsbox { flex-direction: column; cursor: default; }
+  .nsmain { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  .nsbox .subchk { margin: 4px 0 0 24px; font-weight: 600; }
+  .nsbox .subchk.off { opacity: .45; }
+  .nsbox:has(#nsToggle:checked) { border-color: var(--ok); }
   .fixed-peers { font-size: 12px; color: var(--muted); margin-top: 8px; }
 
   /* Liste déroulante avec recherche (simple ou multiple) */
@@ -234,10 +238,14 @@
 <!-- ÉTAPE 3 -->
 <section class="card" data-panel="3" hidden>
   <h2>3. Flux autorisés</h2>
-  <label class="nsbox"><input type="checkbox" id="nsToggle">
-    <span><b>Autoriser le flux Nord/Sud</b> (source any, destination any)
-      <span class="hint" style="display:block">Tout le network peut joindre et être joint par l'extérieur (<code>0.0.0.0/0</code> sauf <code data-net></code>)
-      et la gateway <code data-gw></code>. Un seul objet ingress + egress, tous ports.</span></span></label>
+  <div class="nsbox">
+    <label class="nsmain"><input type="checkbox" id="nsToggle">
+      <span><b>Autoriser le flux Nord/Sud</b> (source any, destination any)
+        <span class="hint" style="display:block">Tout le network peut joindre et être joint par l'extérieur (<code>0.0.0.0/0</code> sauf <code data-net></code>).
+        Un seul objet ingress + egress, tous ports.</span></span></label>
+    <label class="chk subchk" id="nsGwBox"><input type="checkbox" id="nsGwToggle"> <span>Autoriser la gateway <code data-gw></code>
+      <span class="hint" style="font-weight:400">(ajoute son IP en /32 dans <code>to</code> et <code>from</code> ; sinon elle reste exclue avec le network)</span></span></label>
+  </div>
   <p class="lead">Flux Est/Ouest entre security groups : un ingress et un egress dans deux objets séparés.</p>
   <div id="flowList"></div>
   <ul class="msgs err" id="err3"></ul>
@@ -297,7 +305,7 @@
   const PROTOS = ['TCP', 'UDP', 'SCTP'];
 
   const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
-  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, ns: false, sgs: [], flows: [], layout: {}, step: 1 });
+  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, ns: false, nsGw: true, sgs: [], flows: [], layout: {}, step: 1 });
   let S = blank();
 
   /* ================= Services prédéfinis ================= */
@@ -519,12 +527,12 @@
       const nerr = [];
       if (!m.ng) nerr.push('renseignez le Network Group (étape 1).');
       if (!net) nerr.push('renseignez un Network valide (étape 1).');
-      if (!gw) nerr.push('renseignez une Gateway valide (étape 1).');
+      if (S.nsGw && !gw) nerr.push('renseignez une Gateway valide (étape 1), ou décochez « Autoriser la gateway ».');
       nerr.forEach(e => errs[3].push('Flux Nord/Sud : ' + e));
       if (!nerr.length) {
         const any = { any: true, groups: [] };
         const pol = { dir: 'both', target: any, src: any, dst: any, flow: { desc: '' }, idx: 'N/S', ports: [], apps: [],
-          peers: [{ cidr: '0.0.0.0/0', except: [net.cidr] }, { cidr: gw + '/32' }] };
+          peers: [{ cidr: '0.0.0.0/0', except: [net.cidr] }].concat(S.nsGw ? [{ cidr: gw + '/32' }] : []) };
         pol.name = polName(pol);
         pols.unshift(pol);
       }
@@ -861,6 +869,7 @@
     });
     // Étape 3
     $('nsToggle').checked = !!S.ns;
+    $('nsGwToggle').checked = !!S.nsGw; $('nsGwToggle').disabled = !S.ns; $('nsGwBox').classList.toggle('off', !S.ns);
     document.querySelectorAll('[data-net]').forEach(n => { n.textContent = m.network || '<network>'; });
     document.querySelectorAll('[data-gw]').forEach(n => { n.textContent = m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '<gateway>'; });
     document.querySelectorAll('#flowList [data-flow]').forEach(el => {
@@ -1007,7 +1016,7 @@
           y0: Math.min(...list.map(d => d.y - d.h / 2)) - 80, y1: Math.max(...list.map(d => d.y + d.h / 2)) + mBot }
       : { x0: G.W / 2 - 260, x1: G.W / 2 + 260, y0: NODE_MIN_Y - 80, y1: NODE_MIN_Y + 120 };
     if (fr.x1 - fr.x0 < GW_W + 340) { const mx = (fr.x0 + fr.x1) / 2; fr.x0 = mx - GW_W / 2 - 170; fr.x1 = mx + GW_W / 2 + 170; }
-    const gw = { x: (fr.x0 + fr.x1) / 2, y: fr.y0, w: GW_W, h: NH, label: 'Gateway', sub: m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '(non renseignée)' };
+    const gw = { x: (fr.x0 + fr.x1) / 2, y: fr.y0, w: GW_W, h: NH, label: 'Gateway', sub: (m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '(non renseignée)') + (S.ns && !S.nsGw ? ' · non autorisée' : '') };
     const ext = { x: gw.x, y: fr.y0 - 125, w: GW_W, h: NH, label: 'Extérieur', sub: '0.0.0.0/0 sauf ' + (m.network || 'network') };
 
     const out = [];
@@ -1089,7 +1098,7 @@
       out.push('</g>');
     };
     list.forEach(nd => drawNode(nd, { stroke: col.accent, drag: true }));
-    drawNode(gw, { stroke: S.ns ? col.ok : col.border, sw: 2.2 });
+    drawNode(gw, { stroke: S.ns && S.nsGw ? col.ok : col.border, sw: 2.2 });
     drawNode(ext, { stroke: S.ns ? col.ok : col.border, sw: 2.2, dash: true });
     labels.forEach(l => {
       const t = trunc(l.t, 28), w = t.length * 6.6 + 12;
@@ -1111,7 +1120,7 @@
     dgSvg.innerHTML = out.join('');
 
     const legend = [];
-    if (S.ns) legend.push('<li><span class="sw dash"></span><span><b>Nord/Sud</b> : tout le network ↔ gateway ↔ extérieur, tous ports (<code>' + esc((m.ng ? m.ng + '-' : '') + 'bypass-nord-sud') + '</code>)</span></li>');
+    if (S.ns) legend.push('<li><span class="sw dash"></span><span><b>Nord/Sud</b> : tout le network ↔ extérieur' + (S.nsGw ? ' et gateway' : ' (gateway non autorisée)') + ', tous ports (<code>' + esc((m.ng ? m.ng + '-' : '') + 'bypass-nord-sud') + '</code>)</span></li>');
     M.flows.forEach(x => {
       const what = x.f.self ? sideLabel(x.src) + ' (allow-self, pastille « self »)' : sideLabel(x.src) + ' → ' + sideLabel(x.dst);
       legend.push('<li><span class="sw" style="background:' + (x.f.self ? col.ok : FLOW_COLORS[x.i % FLOW_COLORS.length]) + '"></span><span><b>Flux ' + (x.i + 1) + '</b> : ' + esc(what) +
@@ -1169,6 +1178,7 @@
     const ids = (v) => Array.isArray(v) ? v.filter(x => typeof x === 'string') : (typeof v === 'string' && v ? [v] : []);
     if (d.meta) META.forEach(k => o.meta[k] = str(d.meta[k]));
     if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), ips: str(g.ips) }));
+    o.nsGw = d.nsGw !== false;
     o.ns = !!d.ns || (Array.isArray(d.flows) && d.flows.some(f => f && f.type === 'ns'));
     if (Array.isArray(d.flows)) o.flows = d.flows.filter(f => f && f.type !== 'ns').map(f => ({ id: str(f.id) || uid(),
       src: ids(f.src), dst: ids(f.dst), desc: str(f.desc), self: !!f.self,
@@ -1192,6 +1202,7 @@
   };
   $('addFlow').onclick = () => { S.flows.push({ id: uid(), src: [], dst: [], desc: '', ports: [] }); renderFlows(); refresh(); };
   $('nsToggle').addEventListener('change', (e) => { S.ns = e.target.checked; refresh(); });
+  $('nsGwToggle').addEventListener('change', (e) => { S.nsGw = e.target.checked; refresh(); });
   function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); flash('Copié ✓'); }
