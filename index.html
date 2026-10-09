@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Générateur MultiNetworkPolicy</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1d2330; --muted: #5d6677;
+    --border: #d6dbe3; --accent: #c4161c; --accent-text: #ffffff; --focus: #2563eb;
+    --error: #b42318; --error-bg: #fdecea; --ok: #067647;
+    --code-bg: #12161f; --code-text: #e6e9ef; --key: #7cc4fa; --str: #b5e48c; --num: #f9c74f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218; --panel: #171b23; --panel-2: #1e232d; --text: #e6e9ef; --muted: #9aa3b2;
+      --border: #2c3340; --accent: #ef4444; --accent-text: #ffffff; --focus: #60a5fa;
+      --error: #f97066; --error-bg: #3a1714; --ok: #47cd89;
+      --code-bg: #0a0d12;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218; --panel: #171b23; --panel-2: #1e232d; --text: #e6e9ef; --muted: #9aa3b2;
+    --border: #2c3340; --accent: #ef4444; --accent-text: #ffffff; --focus: #60a5fa;
+    --error: #f97066; --error-bg: #3a1714; --ok: #47cd89;
+    --code-bg: #0a0d12;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
+    padding: 16px; max-width: 1400px; margin: 0 auto; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  code { overflow-wrap: anywhere; }
+  section.card h2 { flex-wrap: wrap; }
+  section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; margin-bottom: 16px; }
+  section.card h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
+  label.field { display: block; }
+  label.field > span { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); color: var(--text); font: inherit; }
+  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; resize: vertical; }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  input.invalid { border-color: var(--error); background: var(--error-bg); }
+  .toggles { display: flex; gap: 16px; flex-wrap: wrap; }
+  .toggles label { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); padding: 6px 12px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.link { border: none; background: none; color: var(--error); padding: 4px 6px; }
+  button.small { padding: 3px 9px; font-size: 13px; }
+  .rule { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: var(--panel-2); }
+  .rule-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .rule-head strong { font-size: 13px; }
+  .sub { margin-top: 10px; }
+  .sub-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 6px; }
+  .row { display: grid; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .row.ip { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) auto; }
+  .row.port { grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr) auto; }
+  @media (max-width: 520px) {
+    .row.ip { grid-template-columns: 1fr auto; }
+    .row.ip > :nth-child(2) { grid-column: 1; grid-row: 2; }
+    .row.port { grid-template-columns: 1fr 1fr auto; }
+    .row.port > :nth-child(1) { grid-column: 1 / -1; }
+  }
+  .empty-note { font-size: 12px; color: var(--muted); font-style: italic; margin: 2px 0 6px; }
+  .disabled { opacity: .45; pointer-events: none; }
+  .output { position: sticky; top: 16px; }
+  pre#yaml { background: var(--code-bg); color: var(--code-text); padding: 14px; border-radius: 8px;
+    overflow: auto; margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    min-height: 200px; max-height: 70vh; white-space: pre; }
+  pre#yaml .k { color: var(--key); } pre#yaml .s { color: var(--str); } pre#yaml .n { color: var(--num); }
+  .actions { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+  .status { font-size: 12px; color: var(--ok); }
+  ul#errors { margin: 10px 0 0; padding: 10px 10px 10px 28px; border-radius: 6px; background: var(--error-bg); color: var(--error); font-size: 13px; }
+  ul#errors:empty { display: none; }
+  .theme-toggle { float: right; }
+</style>
+</head>
+<body>
+<header>
+  <button class="theme-toggle small" id="themeBtn" type="button" title="Changer de thème">◐ Thème</button>
+  <h1>Générateur de MultiNetworkPolicy</h1>
+  <p>Règles de firewall distribué OpenShift (<code>k8s.cni.cncf.io/v1beta1</code>) — le YAML se met à jour en direct.</p>
+</header>
+
+<main>
+  <div>
+    <section class="card">
+      <h2>Métadonnées</h2>
+      <div class="grid2">
+        <label class="field"><span>Nom de la règle</span>
+          <input type="text" id="name" value="policy-emerald-angelfish" spellcheck="false">
+          <div class="hint">Minuscules, chiffres, « - » (DNS-1123, 253 car. max)</div>
+        </label>
+        <label class="field"><span>Namespace</span>
+          <input type="text" id="namespace" value="dc-sofia-dev" spellcheck="false">
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Annotation <code>k8s.v1.cni.cncf.io/policy-for</code></h2>
+      <div class="grid2">
+        <label class="field"><span>Namespace de la NAD</span>
+          <input type="text" id="nadNs" value="dc-elsan-eds" spellcheck="false">
+        </label>
+        <label class="field"><span>Nom de la NAD</span>
+          <input type="text" id="nadName" value="eds-promptly-travail-10-235-10-0-24" spellcheck="false">
+        </label>
+      </div>
+      <div class="hint" id="annotPreview"></div>
+    </section>
+
+    <section class="card">
+      <h2>podSelector</h2>
+      <label class="field"><span>Labels (matchLabels)</span>
+        <textarea id="podLabels" rows="2" placeholder="app=frontend&#10;tier=web" spellcheck="false"></textarea>
+        <div class="hint">Une ligne <code>clé=valeur</code> par label. Vide = <code>{}</code> (tous les pods du namespace).</div>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Types de politique</h2>
+      <div class="toggles">
+        <label><input type="checkbox" id="useIngress"> Ingress (trafic entrant → <code>from</code>)</label>
+        <label><input type="checkbox" id="useEgress"> Egress (trafic sortant → <code>to</code>)</label>
+      </div>
+      <div class="hint">Un type coché sans aucune règle = tout est bloqué dans ce sens (deny all).</div>
+    </section>
+
+    <section class="card" id="ingressCard">
+      <h2>Règles Ingress <small style="font-weight:400;color:var(--muted)">— sources autorisées (<code>from</code>)</small></h2>
+      <div id="ingressRules"></div>
+      <button type="button" class="small" data-add-rule="ingress">+ Ajouter une règle ingress</button>
+    </section>
+
+    <section class="card" id="egressCard">
+      <h2>Règles Egress <small style="font-weight:400;color:var(--muted)">— destinations autorisées (<code>to</code>)</small></h2>
+      <div id="egressRules"></div>
+      <button type="button" class="small" data-add-rule="egress">+ Ajouter une règle egress</button>
+    </section>
+  </div>
+
+  <div class="output">
+    <section class="card">
+      <h2>YAML généré</h2>
+      <div class="actions">
+        <button type="button" class="primary" id="copyBtn">Copier</button>
+        <button type="button" id="dlBtn">Télécharger .yaml</button>
+        <button type="button" id="resetBtn">Réinitialiser</button>
+        <span class="status" id="status" aria-live="polite"></span>
+      </div>
+      <pre id="yaml"></pre>
+      <ul id="errors"></ul>
+    </section>
+  </div>
+</main>
+
+<template id="ruleTpl">
+  <div class="rule">
+    <div class="rule-head"><strong class="rule-title"></strong>
+      <button type="button" class="link small" data-act="del-rule">Supprimer la règle</button></div>
+    <div class="sub">
+      <div class="sub-title peers-title"></div>
+      <div class="peers"></div>
+      <button type="button" class="small" data-act="add-peer">+ ipBlock</button>
+    </div>
+    <div class="sub">
+      <div class="sub-title">Ports</div>
+      <div class="ports"></div>
+      <button type="button" class="small" data-act="add-port">+ Port</button>
+    </div>
+  </div>
+</template>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const STORE_KEY = 'mnp-generator-v1';
+  const state = { ingress: [], egress: [] };
+
+  /* ---------- Thème ---------- */
+  const applyTheme = (t) => { if (t) document.documentElement.setAttribute('data-theme', t); };
+  try { applyTheme(localStorage.getItem('mnp-theme')); } catch (e) {}
+  $('themeBtn').onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    try { localStorage.setItem('mnp-theme', next); } catch (e) {}
+  };
+
+  /* ---------- Validation ---------- */
+  const DNS1123_SUB = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+  const DNS1123_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+  const IANA_SVC = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+
+  function parseIPv4(s) {
+    const p = s.split('.');
+    if (p.length !== 4) return null;
+    let n = 0;
+    for (const x of p) {
+      if (!/^\d{1,3}$/.test(x) || +x > 255) return null;
+      n = n * 256 + +x;
+    }
+    return n;
+  }
+  function isIPv6(s) {
+    if (!/^[0-9a-fA-F:.]+$/.test(s) || !s.includes(':')) return false;
+    try { new URL('http://[' + s + ']/'); return true; } catch (e) { return false; }
+  }
+  // Retourne {ok, v4, net, bits, msg}
+  function checkCidr(c) {
+    const m = c.match(/^(.+)\/(\d{1,3})$/);
+    if (!m) return { ok: false, msg: 'format attendu a.b.c.d/nn' };
+    const bits = +m[2];
+    const v4 = parseIPv4(m[1]);
+    if (v4 !== null) {
+      if (bits > 32) return { ok: false, msg: 'masque > 32' };
+      const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
+      return { ok: true, v4: true, net: (v4 & mask) >>> 0, addr: v4, bits, mask };
+    }
+    if (isIPv6(m[1])) {
+      if (bits > 128) return { ok: false, msg: 'masque > 128' };
+      return { ok: true, v4: false };
+    }
+    return { ok: false, msg: 'adresse IP invalide' };
+  }
+
+  /* ---------- Modèle ---------- */
+  const newPeer = () => ({ cidr: '', except: '' });
+  const newPort = () => ({ protocol: 'TCP', port: '', endPort: '' });
+  const newRule = () => ({ peers: [newPeer()], ports: [newPort()] });
+
+  /* ---------- Rendu du formulaire ---------- */
+  function renderRules(dir) {
+    const host = $(dir + 'Rules');
+    host.innerHTML = '';
+    const kw = dir === 'ingress' ? 'from' : 'to';
+    if (!state[dir].length) {
+      host.innerHTML = '<p class="empty-note">Aucune règle : si « ' + (dir === 'ingress' ? 'Ingress' : 'Egress') +
+        ' » est coché, tout le trafic ' + (dir === 'ingress' ? 'entrant' : 'sortant') + ' est bloqué.</p>';
+    }
+    state[dir].forEach((rule, ri) => {
+      const node = $('ruleTpl').content.firstElementChild.cloneNode(true);
+      node.querySelector('.rule-title').textContent = 'Règle ' + (ri + 1);
+      node.querySelector('.peers-title').textContent = kw + ' — ipBlock';
+      node.querySelector('[data-act=del-rule]').onclick = () => { state[dir].splice(ri, 1); renderRules(dir); update(); };
+      node.querySelector('[data-act=add-peer]').onclick = () => { rule.peers.push(newPeer()); renderRules(dir); update(); };
+      node.querySelector('[data-act=add-port]').onclick = () => { rule.ports.push(newPort()); renderRules(dir); update(); };
+
+      const peersEl = node.querySelector('.peers');
+      if (!rule.peers.length) peersEl.innerHTML = '<p class="empty-note">Aucun ipBlock : toutes les ' +
+        (dir === 'ingress' ? 'sources' : 'destinations') + ' sont autorisées sur les ports ci-dessous.</p>';
+      rule.peers.forEach((p, pi) => {
+        const row = document.createElement('div');
+        row.className = 'row ip';
+        row.innerHTML = '<input type="text" placeholder="CIDR ex. 10.235.10.0/24" spellcheck="false" aria-label="CIDR">' +
+          '<input type="text" placeholder="except (optionnel) : 10.235.10.5/32, …" spellcheck="false" aria-label="except">' +
+          '<button type="button" class="link" title="Supprimer">✕</button>';
+        const [cidr, exc, del] = row.children;
+        cidr.value = p.cidr; exc.value = p.except;
+        cidr.dataset.check = dir + '|' + ri + '|' + pi + '|cidr';
+        exc.dataset.check = dir + '|' + ri + '|' + pi + '|except';
+        cidr.oninput = () => { p.cidr = cidr.value.trim(); update(); };
+        exc.oninput = () => { p.except = exc.value; update(); };
+        del.onclick = () => { rule.peers.splice(pi, 1); renderRules(dir); update(); };
+        peersEl.appendChild(row);
+      });
+
+      const portsEl = node.querySelector('.ports');
+      if (!rule.ports.length) portsEl.innerHTML = '<p class="empty-note">Aucun port : tous les ports/protocoles sont autorisés.</p>';
+      rule.ports.forEach((p, qi) => {
+        const row = document.createElement('div');
+        row.className = 'row port';
+        row.innerHTML = '<select aria-label="Protocole"><option>TCP</option><option>UDP</option><option>SCTP</option></select>' +
+          '<input type="text" placeholder="port ex. 443" spellcheck="false" aria-label="port">' +
+          '<input type="number" min="1" max="65535" placeholder="endPort (option.)" aria-label="endPort">' +
+          '<button type="button" class="link" title="Supprimer">✕</button>';
+        const [proto, port, end, del] = row.children;
+        proto.value = p.protocol; port.value = p.port; end.value = p.endPort;
+        port.dataset.check = dir + '|' + ri + '|' + qi + '|port';
+        end.dataset.check = dir + '|' + ri + '|' + qi + '|endPort';
+        proto.onchange = () => { p.protocol = proto.value; update(); };
+        port.oninput = () => { p.port = port.value.trim(); update(); };
+        end.oninput = () => { p.endPort = end.value.trim(); update(); };
+        del.onclick = () => { rule.ports.splice(qi, 1); renderRules(dir); update(); };
+        portsEl.appendChild(row);
+      });
+      host.appendChild(node);
+    });
+  }
+
+  /* ---------- Validation globale ---------- */
+  function validate() {
+    const errs = [];
+    const bad = new Set();
+    const name = $('name').value.trim(), ns = $('namespace').value.trim();
+    const nadNs = $('nadNs').value.trim(), nadName = $('nadName').value.trim();
+    const mark = (id, cond, msg) => { $(id).classList.toggle('invalid', !cond); if (!cond) errs.push(msg); };
+    mark('name', name && name.length <= 253 && DNS1123_SUB.test(name), 'Nom de la règle invalide (DNS-1123).');
+    mark('namespace', ns && ns.length <= 63 && DNS1123_LABEL.test(ns), 'Namespace invalide (DNS-1123, 63 car. max).');
+    mark('nadNs', nadNs && DNS1123_LABEL.test(nadNs), 'Namespace de la NAD invalide.');
+    mark('nadName', nadName && DNS1123_SUB.test(nadName), 'Nom de la NAD invalide.');
+
+    for (const line of $('podLabels').value.split('\n')) {
+      if (!line.trim()) continue;
+      if (!/^\s*[^=\s]+\s*=\s*[^=]*$/.test(line)) { errs.push('podSelector : ligne « ' + line.trim() + ' » attendue au format clé=valeur.'); }
+    }
+
+    if (!$('useIngress').checked && !$('useEgress').checked)
+      errs.push('Cochez au moins Ingress ou Egress (policyTypes vide = aucune restriction appliquée).');
+
+    for (const dir of ['ingress', 'egress']) {
+      if (!$(dir === 'ingress' ? 'useIngress' : 'useEgress').checked) continue;
+      const D = dir === 'ingress' ? 'Ingress' : 'Egress';
+      state[dir].forEach((r, ri) => {
+        r.peers.forEach((p, pi) => {
+          const where = D + ' règle ' + (ri + 1) + ', ipBlock ' + (pi + 1);
+          const c = checkCidr(p.cidr);
+          if (!c.ok) { errs.push(where + ' : CIDR « ' + (p.cidr || '(vide)') + ' » — ' + c.msg + '.'); bad.add(dir + '|' + ri + '|' + pi + '|cidr'); return; }
+          if (c.v4 && c.addr !== c.net) errs.push(where + ' : ' + p.cidr + ' a des bits d\'hôte ; réseau attendu probablement ' +
+            [24, 16, 8, 0].map(s => (c.net >>> s) & 255).join('.') + '/' + c.bits + '.');
+          for (const e of p.except.split(',').map(s => s.trim()).filter(Boolean)) {
+            const ce = checkCidr(e);
+            if (!ce.ok) { errs.push(where + ' : except « ' + e + ' » — ' + ce.msg + '.'); bad.add(dir + '|' + ri + '|' + pi + '|except'); continue; }
+            if (c.v4 !== ce.v4) { errs.push(where + ' : except « ' + e + ' » n\'est pas de la même famille IP que le CIDR.'); bad.add(dir + '|' + ri + '|' + pi + '|except'); continue; }
+            if (c.v4 && (ce.bits <= c.bits || ((ce.addr & c.mask) >>> 0) !== c.net)) {
+              errs.push(where + ' : except « ' + e + ' » doit être strictement inclus dans ' + p.cidr + '.');
+              bad.add(dir + '|' + ri + '|' + pi + '|except');
+            }
+          }
+        });
+        r.ports.forEach((p, qi) => {
+          const where = D + ' règle ' + (ri + 1) + ', port ' + (qi + 1);
+          const key = dir + '|' + ri + '|' + qi;
+          const numeric = /^\d+$/.test(p.port);
+          if (p.port === '') {
+            if (p.endPort) { errs.push(where + ' : endPort nécessite un port.'); bad.add(key + '|port'); }
+          } else if (numeric) {
+            if (+p.port < 1 || +p.port > 65535) { errs.push(where + ' : port hors plage 1-65535.'); bad.add(key + '|port'); }
+          } else if (!(p.port.length <= 15 && IANA_SVC.test(p.port) && /[a-z]/.test(p.port))) {
+            errs.push(where + ' : port nommé « ' + p.port + ' » invalide.'); bad.add(key + '|port');
+          }
+          if (p.endPort !== '') {
+            if (!numeric) { errs.push(where + ' : endPort exige un port numérique.'); bad.add(key + '|endPort'); }
+            else if (!/^\d+$/.test(p.endPort) || +p.endPort > 65535 || +p.endPort < +p.port) {
+              errs.push(where + ' : endPort doit être ≥ port et ≤ 65535.'); bad.add(key + '|endPort');
+            }
+          }
+        });
+      });
+    }
+    document.querySelectorAll('[data-check]').forEach(el => el.classList.toggle('invalid', bad.has(el.dataset.check)));
+    return errs;
+  }
+
+  /* ---------- Génération YAML ---------- */
+  function q(s) {
+    // Scalaire YAML : guillemets si nécessaire
+    if (s === '' || /^[\s]|[\s]$|[:#\[\]{},&*!|>'"%@`]|^(true|false|yes|no|on|off|null|~|y|n)$/i.test(s) || /^[-?\d.]/.test(s))
+      return JSON.stringify(s);
+    return s;
+  }
+  function buildYaml() {
+    const L = [];
+    const name = $('name').value.trim(), ns = $('namespace').value.trim();
+    const annot = $('nadNs').value.trim() + '/' + $('nadName').value.trim();
+    L.push('apiVersion: k8s.cni.cncf.io/v1beta1');
+    L.push('kind: MultiNetworkPolicy');
+    L.push('metadata:');
+    L.push('  name: ' + q(name));
+    L.push('  namespace: ' + q(ns));
+    L.push('  annotations:');
+    L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(annot));
+    L.push('spec:');
+    const labels = $('podLabels').value.split('\n').map(l => l.trim()).filter(l => l.includes('='))
+      .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; });
+    if (!labels.length) L.push('  podSelector: {}');
+    else {
+      L.push('  podSelector:');
+      L.push('    matchLabels:');
+      labels.forEach(([k, v]) => L.push('      ' + q(k) + ': ' + JSON.stringify(v)));
+    }
+    const types = [];
+    if ($('useIngress').checked) types.push('Ingress');
+    if ($('useEgress').checked) types.push('Egress');
+    if (!types.length) L.push('  policyTypes: []');
+    else { L.push('  policyTypes:'); types.forEach(t => L.push('    - ' + t)); }
+
+    for (const dir of ['ingress', 'egress']) {
+      if (!types.includes(dir === 'ingress' ? 'Ingress' : 'Egress')) continue;
+      const kw = dir === 'ingress' ? 'from' : 'to';
+      if (!state[dir].length) { L.push('  ' + dir + ': []'); continue; }
+      L.push('  ' + dir + ':');
+      state[dir].forEach(r => {
+        const peers = r.peers.filter(p => p.cidr);
+        const ports = r.ports.filter(p => p.port || p.endPort);
+        if (!peers.length && !ports.length) { L.push('    - {}'); return; }
+        let first = true;
+        const item = (line) => { L.push((first ? '    - ' : '      ') + line); first = false; };
+        if (peers.length) {
+          item(kw + ':');
+          peers.forEach(p => {
+            L.push('        - ipBlock:');
+            L.push('            cidr: ' + p.cidr);
+            const ex = p.except.split(',').map(s => s.trim()).filter(Boolean);
+            if (ex.length) { L.push('            except:'); ex.forEach(e => L.push('              - ' + e)); }
+          });
+        }
+        if (ports.length) {
+          item('ports:');
+          ports.forEach(p => {
+            L.push('        - protocol: ' + p.protocol);
+            if (p.port) L.push('          port: ' + (/^\d+$/.test(p.port) ? p.port : q(p.port)));
+            if (p.endPort) L.push('          endPort: ' + p.endPort);
+          });
+        }
+      });
+    }
+    return L.join('\n') + '\n';
+  }
+
+  function highlight(yaml) {
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return yaml.split('\n').map(line => {
+      const m = line.match(/^(\s*(?:- )?)([^:\s][^:]*?):(\s|$)(.*)$/);
+      if (!m) return esc(line).replace(/^(\s*- )(.+)$/, (_, a, b) => a + '<span class="s">' + b + '</span>');
+      const val = m[4];
+      const cls = /^\d+$/.test(val) ? 'n' : 's';
+      return esc(m[1]) + '<span class="k">' + esc(m[2]) + '</span>:' + m[3] + (val ? '<span class="' + cls + '">' + esc(val) + '</span>' : '');
+    }).join('\n');
+  }
+
+  /* ---------- Persistance locale (confort) ---------- */
+  const FIELDS = ['name', 'namespace', 'nadNs', 'nadName', 'podLabels'];
+  function save() {
+    try {
+      const data = { state, ing: $('useIngress').checked, eg: $('useEgress').checked };
+      FIELDS.forEach(f => data[f] = $(f).value);
+      localStorage.setItem(STORE_KEY, JSON.stringify(data));
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      const data = JSON.parse(localStorage.getItem(STORE_KEY));
+      if (!data) return false;
+      FIELDS.forEach(f => { if (typeof data[f] === 'string') $(f).value = data[f]; });
+      $('useIngress').checked = !!data.ing; $('useEgress').checked = !!data.eg;
+      state.ingress = data.state.ingress || []; state.egress = data.state.egress || [];
+      return true;
+    } catch (e) { return false; }
+  }
+
+  let currentYaml = '';
+  function update() {
+    $('ingressCard').classList.toggle('disabled', !$('useIngress').checked);
+    $('egressCard').classList.toggle('disabled', !$('useEgress').checked);
+    $('annotPreview').innerHTML = 'Valeur : <code></code>';
+    $('annotPreview').firstElementChild.textContent = $('nadNs').value.trim() + '/' + $('nadName').value.trim();
+    const errs = validate();
+    currentYaml = buildYaml();
+    $('yaml').innerHTML = highlight(currentYaml);
+    const ul = $('errors'); ul.innerHTML = '';
+    errs.forEach(e => { const li = document.createElement('li'); li.textContent = e; ul.appendChild(li); });
+    save();
+  }
+
+  function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
+
+  /* ---------- Événements ---------- */
+  FIELDS.forEach(f => $(f).addEventListener('input', update));
+  ['useIngress', 'useEgress'].forEach(id => $(id).addEventListener('change', () => {
+    const dir = id === 'useIngress' ? 'ingress' : 'egress';
+    if ($(id).checked && !state[dir].length) { state[dir].push(newRule()); renderRules(dir); }
+    update();
+  }));
+  document.querySelectorAll('[data-add-rule]').forEach(b => b.onclick = () => {
+    const dir = b.dataset.addRule; state[dir].push(newRule()); renderRules(dir); update();
+  });
+  $('copyBtn').onclick = async () => {
+    try { await navigator.clipboard.writeText(currentYaml); flash('Copié ✓'); }
+    catch (e) {
+      const ta = document.createElement('textarea'); ta.value = currentYaml; document.body.appendChild(ta);
+      ta.select(); try { document.execCommand('copy'); flash('Copié ✓'); } catch (_) { flash('Copie impossible'); }
+      ta.remove();
+    }
+  };
+  $('dlBtn').onclick = () => {
+    const blob = new Blob([currentYaml], { type: 'application/x-yaml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = ($('name').value.trim() || 'multinetworkpolicy') + '.yaml';
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $('resetBtn').onclick = () => {
+    if (!confirm('Réinitialiser le formulaire ?')) return;
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    location.reload();
+  };
+
+  load();
+  renderRules('ingress'); renderRules('egress');
+  update();
+})();
+</script>
+</body>
+</html>
