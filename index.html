@@ -102,6 +102,11 @@
   pre#yaml { background: var(--code-bg); color: var(--code-text); padding: 14px; border-radius: 8px; overflow: auto;
     margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-height: 75vh; white-space: pre; }
   pre#yaml .k { color: var(--key); } pre#yaml .s { color: var(--str); } pre#yaml .n { color: var(--num); } pre#yaml .c { color: var(--cmt); font-style: italic; }
+  label.field > span.prefixed { display: flex; margin: 0; font-weight: 400; font-size: inherit; }
+  .prefixed .pfx { flex: none; display: flex; align-items: center; padding: 0 8px; border: 1px solid var(--border); border-right: none;
+    border-radius: 6px 0 0 6px; background: var(--panel); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prefixed .pfx:empty { display: none; }
+  .prefixed .pfx:not(:empty) + input { border-radius: 0 6px 6px 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -122,7 +127,7 @@
 </header>
 
 <nav class="steps" aria-label="Étapes">
-  <button type="button" data-step="1"><span class="num">1</span><span class="lbl"><b>Contexte</b><small>Namespace, NAD, nom</small></span></button>
+  <button type="button" data-step="1"><span class="num">1</span><span class="lbl"><b>Contexte</b><small>Namespace, NAD, network group</small></span></button>
   <button type="button" data-step="2"><span class="num">2</span><span class="lbl"><b>Security groups</b><small id="sgCount">0 groupe</small></span></button>
   <button type="button" data-step="3"><span class="num">3</span><span class="lbl"><b>Flux</b><small id="flowCount">0 flux</small></span></button>
   <button type="button" data-step="4"><span class="num">4</span><span class="lbl"><b>YAML</b><small id="polCount">0 policy</small></span></button>
@@ -133,19 +138,16 @@
   <h2>1. Contexte</h2>
   <p class="lead">Où les règles s'appliquent : le namespace des pods et le réseau secondaire (NAD) filtré.</p>
   <div class="grid2">
-    <label class="field"><span>Nom de la règle</span>
-      <input type="text" id="m_name" spellcheck="false" placeholder="ex. promptly-travail">
-      <div class="hint">Sert de préfixe : chaque objet généré s'appellera <code>&lt;nom&gt;-&lt;groupe&gt;-ingress|egress</code>.</div>
-    </label>
     <label class="field"><span>Namespace</span>
-      <input type="text" id="m_namespace" spellcheck="false" placeholder="ex. dc-sofia-dev">
-      <div class="hint">Namespace des pods protégés (là où les MultiNetworkPolicy sont créées).</div>
-    </label>
-    <label class="field"><span>Namespace de la NAD</span>
-      <input type="text" id="m_nadNs" spellcheck="false" placeholder="ex. dc-elsan-eds">
+      <input type="text" id="m_namespace" spellcheck="false" placeholder="ex. dc-elsan-eds">
+      <div class="hint">Namespace des pods protégés et de la NAD ; les MultiNetworkPolicy y sont créées.</div>
     </label>
     <label class="field"><span>Nom de la NAD</span>
       <input type="text" id="m_nadName" spellcheck="false" placeholder="ex. eds-promptly-travail-10-235-10-0-24">
+    </label>
+    <label class="field"><span>Network Group</span>
+      <input type="text" id="m_ng" spellcheck="false" placeholder="ex. promptly">
+      <div class="hint">Préfixe des security groups : <code>&lt;network-group&gt;-&lt;groupe&gt;</code>. Les objets générés s'appellent <code>&lt;network-group&gt;-&lt;groupe&gt;-ingress|egress</code>.</div>
     </label>
   </div>
   <p class="hint" id="annotPreview"></p>
@@ -213,7 +215,7 @@
   const uid = () => Math.random().toString(36).slice(2, 9);
 
   const blank = () => ({
-    meta: { name: '', namespace: '', nadNs: '', nadName: '', defaultDeny: false },
+    meta: { namespace: '', nadName: '', ng: '', defaultDeny: false },
     sgs: [], flows: [], step: 1,
   });
   let S = blank();
@@ -270,15 +272,15 @@
     return { labels: out, errs };
   }
   const sgById = (id) => S.sgs.find(g => g.id === id);
-  const sgLabel = (g) => g ? (g.name || '(sans nom)') : '(groupe supprimé)';
+  const fullName = (g) => (S.meta.ng ? S.meta.ng + '-' : '') + g.name;
+  const sgLabel = (g) => g ? (g.name ? fullName(g) : '(sans nom)') : '(groupe supprimé)';
 
   /* ================= Modèle -> politiques ================= */
   function analyse() {
     const errs = { 1: [], 2: [], 3: [] }, warns = [];
     const m = S.meta;
-    if (!m.name || m.name.length > 200 || !DNS_SUB.test(m.name)) errs[1].push('Nom de la règle : minuscules, chiffres, « - » ou « . » (DNS-1123).');
     if (!m.namespace || m.namespace.length > 63 || !DNS_LABEL.test(m.namespace)) errs[1].push('Namespace invalide (DNS-1123, 63 car. max).');
-    if (!m.nadNs || m.nadNs.length > 63 || !DNS_LABEL.test(m.nadNs)) errs[1].push('Namespace de la NAD invalide.');
+    if (m.ng && (m.ng.length > 40 || !DNS_LABEL.test(m.ng))) errs[1].push('Network Group invalide (minuscules, chiffres, « - », 40 car. max).');
     if (!m.nadName || !DNS_SUB.test(m.nadName)) errs[1].push('Nom de la NAD invalide.');
 
     const sgInfo = {};
@@ -286,7 +288,7 @@
     S.sgs.forEach((g, i) => {
       const where = 'Groupe « ' + sgLabel(g) + ' »';
       const info = { cidrs: [], badIps: false, labels: [], badLabels: false, badName: false };
-      if (!g.name || g.name.length > 50 || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - », 50 car. max).'); info.badName = true; }
+      if (!g.name || fullName(g).length > 200 || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - »).'); info.badName = true; }
       else if (names.has(g.name)) { errs[2].push('Nom de groupe en double : « ' + g.name + ' ».'); info.badName = true; }
       names.add(g.name);
       const seen = new Set();
@@ -383,7 +385,7 @@
     L.push('  name: ' + q(name));
     L.push('  namespace: ' + q(S.meta.namespace));
     L.push('  annotations:');
-    L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(S.meta.nadNs + '/' + S.meta.nadName));
+    L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(S.meta.namespace + '/' + S.meta.nadName));
     L.push('spec:');
   }
   function podSelector(L, labels) {
@@ -393,14 +395,14 @@
     labels.forEach(([k, v]) => L.push('      ' + q(k) + ': ' + JSON.stringify(v)));
   }
   const oneLine = (s) => s.replace(/[\r\n]+/g, ' ');
-  function polName(p) { return S.meta.name + '-' + p.sg.name + '-' + p.dir; }
+  function polName(p) { return fullName(p.sg) + '-' + p.dir; }
 
   function buildYaml(A) {
     const L = [], objs = [];
     const push = (name, kind, target, rules, lines) => objs.push({ name, kind, target, rules, text: lines.join('\n') + '\n' });
     if (S.meta.defaultDeny) {
       for (const dir of ['ingress', 'egress']) {
-        const l = [], n = S.meta.name + '-default-deny-' + dir;
+        const l = [], n = (S.meta.ng ? S.meta.ng + '-' : '') + 'default-deny-' + dir;
         header(l, n, ['Bloque tout le trafic ' + (dir === 'ingress' ? 'entrant' : 'sortant') + ' non autorisé explicitement']);
         l.push('  podSelector: {}');
         l.push('  policyTypes:');
@@ -411,13 +413,13 @@
     }
     for (const p of A.pols) {
       const l = [], n = polName(p), kw = p.dir === 'ingress' ? 'from' : 'to';
-      header(l, n, ['Groupe interne : ' + p.sg.name + ' — ' + (p.dir === 'ingress' ? 'flux entrants' : 'flux sortants')]);
+      header(l, n, ['Groupe interne : ' + fullName(p.sg) + ' — ' + (p.dir === 'ingress' ? 'flux entrants' : 'flux sortants')]);
       podSelector(l, A.sgInfo[p.sg.id].labels);
       l.push('  policyTypes:');
       l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
       l.push('  ' + p.dir + ':');
       for (const r of p.rules) {
-        l.push('    # Flux ' + r.idx + ' : ' + r.src.name + ' → ' + r.dst.name + (r.flow.desc ? ' — ' + oneLine(r.flow.desc) : ''));
+        l.push('    # Flux ' + r.idx + ' : ' + fullName(r.src) + ' → ' + fullName(r.dst) + (r.flow.desc ? ' — ' + oneLine(r.flow.desc) : ''));
         l.push('    - ' + kw + ':');
         r.peers.forEach(c => { l.push('        - ipBlock:'); l.push('            cidr: ' + c); });
         if (r.ports.length) {
@@ -446,7 +448,7 @@
   }
 
   /* ================= Rendu ================= */
-  const META = ['name', 'namespace', 'nadNs', 'nadName'];
+  const META = ['namespace', 'nadName', 'ng'];
   function renderMeta() {
     META.forEach(k => { $('m_' + k).value = S.meta[k]; });
     $('m_defaultDeny').checked = !!S.meta.defaultDeny;
@@ -465,7 +467,7 @@
         (used ? ' <span class="hint">· utilisé dans ' + used + ' flux</span>' : '') + '</strong>' +
         '<button type="button" class="danger small" data-del>Supprimer</button></div>' +
         '<div class="grid2">' +
-          '<label class="field"><span>Nom du groupe</span><input type="text" data-f="name" spellcheck="false" placeholder="ex. app-front"></label>' +
+          '<label class="field"><span>Nom du groupe</span><span class="prefixed"><span class="pfx" data-pfx></span><input type="text" data-f="name" spellcheck="false" placeholder="ex. front"></span></label>' +
           '<label class="field"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel"></label>' +
         '</div>' +
         '<label class="field" style="margin-top:10px"><span>IP / réseaux</span>' +
@@ -558,16 +560,16 @@
     const A = analyse();
     // Étape 1
     $('annotPreview').innerHTML = 'Annotation : <code></code>';
-    $('annotPreview').firstElementChild.textContent = 'k8s.v1.cni.cncf.io/policy-for: ' + S.meta.nadNs + '/' + S.meta.nadName;
+    $('annotPreview').firstElementChild.textContent = 'k8s.v1.cni.cncf.io/policy-for: ' + S.meta.namespace + '/' + S.meta.nadName;
     const m = S.meta;
-    $('m_name').classList.toggle('invalid', !!m.name && !(m.name.length <= 200 && DNS_SUB.test(m.name)));
     $('m_namespace').classList.toggle('invalid', !!m.namespace && !DNS_LABEL.test(m.namespace));
-    $('m_nadNs').classList.toggle('invalid', !!m.nadNs && !DNS_LABEL.test(m.nadNs));
+    $('m_ng').classList.toggle('invalid', !!m.ng && !(m.ng.length <= 40 && DNS_LABEL.test(m.ng)));
     $('m_nadName').classList.toggle('invalid', !!m.nadName && !DNS_SUB.test(m.nadName));
     $('nsRef').textContent = m.namespace || '…';
     // Étape 2 : marquage
     document.querySelectorAll('#sgList [data-sg]').forEach(el => {
       const info = A.sgInfo[el.dataset.sg]; if (!info) return;
+      el.querySelector('[data-pfx]').textContent = S.meta.ng ? S.meta.ng + '-' : '';
       el.querySelector('[data-f=name]').classList.toggle('invalid', info.badName);
       el.querySelector('[data-f=ips]').classList.toggle('invalid', info.badIps);
       el.querySelector('[data-f=labels]').classList.toggle('invalid', info.badLabels);
@@ -579,7 +581,7 @@
       el.querySelector('[data-f=dst]').classList.toggle('invalid', fs.dst);
       el.querySelectorAll('[data-port]').forEach(inp => inp.classList.toggle('invalid', fs.ports.has(+inp.dataset.port)));
       el.querySelector('[data-effect]').innerHTML = fs.effects.length
-        ? 'Génère : ' + fs.effects.map(([d, g]) => '<span class="tag ' + d + '">' + (d === 'in' ? 'ingress' : 'egress') + '</span> sur <b>' + esc(g.name) + '</b>').join(' + ')
+        ? 'Génère : ' + fs.effects.map(([d, g]) => '<span class="tag ' + d + '">' + (d === 'in' ? 'ingress' : 'egress') + '</span> sur <b>' + esc(fullName(g)) + '</b>').join(' + ')
         : '';
     });
     const showErr = (id, list) => { $(id).innerHTML = list.map(e => '<li>' + esc(e) + '</li>').join(''); };
@@ -631,7 +633,7 @@
   function loadAll(d) { S = sanitize(d); renderMeta(); renderSgs(); renderFlows(); refresh(); goStep(S.step); }
 
   /* ================= Événements ================= */
-  META.forEach(k => $('m_' + k).addEventListener('input', (e) => { S.meta[k] = e.target.value.trim(); refresh(); }));
+  META.forEach(k => $('m_' + k).addEventListener('input', (e) => { S.meta[k] = e.target.value.trim(); if (k === 'ng') renderFlows(); refresh(); }));
   $('m_defaultDeny').addEventListener('change', (e) => { S.meta.defaultDeny = e.target.checked; refresh(); });
   document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => goStep(+b.dataset.step));
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goStep(+b.dataset.go));
@@ -660,8 +662,8 @@
     a.href = URL.createObjectURL(new Blob([text], { type }));
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-  $('dlBtn').onclick = () => download((S.meta.name || 'multinetworkpolicy') + '.yaml', fullYaml, 'application/x-yaml');
-  $('exportBtn').onclick = () => { const { step, ...rest } = S; download((S.meta.name || 'projet') + '.mnp.json', JSON.stringify(rest, null, 2), 'application/json'); };
+  $('dlBtn').onclick = () => download((S.meta.ng || S.meta.nadName || 'multinetworkpolicy') + '.yaml', fullYaml, 'application/x-yaml');
+  $('exportBtn').onclick = () => { const { step, ...rest } = S; download((S.meta.ng || S.meta.nadName || 'projet') + '.mnp.json', JSON.stringify(rest, null, 2), 'application/json'); };
   $('importBtn').onclick = () => $('importFile').click();
   $('importFile').onchange = async (e) => {
     const file = e.target.files[0]; if (!file) return;
