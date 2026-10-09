@@ -270,8 +270,11 @@
 <!-- ÉTAPE 5 -->
 <section class="card" data-panel="5" hidden>
   <h2>5. Schéma des flux</h2>
-  <p class="lead">Flux autorisés entre les security groups, le network et la gateway. Chaque couleur correspond à un flux de l'étape 3.</p>
-  <div class="actions"><button type="button" id="svgBtn">Télécharger le schéma (SVG)</button></div>
+  <p class="lead">Le cadre vert représente « any » (tout le network). Les security groups passent par la gateway pour joindre l'extérieur.
+    Chaque couleur correspond à un flux de l'étape 3 ; la pastille « self » signale un allow-self.</p>
+  <div class="actions"><button type="button" id="relayoutBtn">Réorganiser automatiquement</button>
+    <button type="button" id="svgBtn">Télécharger le schéma (SVG)</button>
+    <span class="hint">Glissez les security groups à la souris pour les déplacer.</span></div>
   <div class="diagram" id="diagram"></div>
   <ul class="legend" id="legend"></ul>
   <div class="navbtns" style="margin-top:12px"><button type="button" data-go="4">← YAML</button><span></span></div>
@@ -294,7 +297,7 @@
   const PROTOS = ['TCP', 'UDP', 'SCTP'];
 
   const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
-  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, ns: false, sgs: [], flows: [], step: 1 });
+  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, ns: false, sgs: [], flows: [], layout: {}, step: 1 });
   let S = blank();
 
   /* ================= Services prédéfinis ================= */
@@ -722,6 +725,7 @@
       el.querySelector('[data-del]').onclick = () => {
         if (used && !confirm('Ce groupe est utilisé dans ' + used + ' flux. Supprimer quand même ? Il sera retiré de ces flux.')) return;
         S.flows.forEach(f => { f.src = f.src.filter(x => x !== g.id); f.dst = f.dst.filter(x => x !== g.id); });
+        delete S.layout[g.id];
         S.sgs.splice(i, 1); renderSgs(); renderFlows(); refresh();
       };
       el.dataset.sg = g.id;
@@ -894,6 +898,7 @@
 
   /* ================= Schéma ================= */
   const FLOW_COLORS = ['#2563eb', '#d97706', '#059669', '#db2777', '#7c3aed', '#0891b2', '#65a30d', '#dc2626'];
+  const NW = 170, NH = 56, GW_W = 210, NODE_MIN_Y = 260;
   const trunc = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
   function flowLabel(f) {
     const ok = f.ports.filter(p => p.port && !portError(p));
@@ -902,142 +907,232 @@
     ok.forEach(p => { const t = p.app || (p.protocol + '/' + p.port + (p.endPort ? '-' + p.endPort : '')); if (!parts.includes(t)) parts.push(t); });
     return parts.join(', ');
   }
-  let diagramSvg = '';
+  // Flux complets, arêtes et pastilles allow-self
+  function diagramModel() {
+    const flows = S.flows.map((f, i) => ({ f, i, src: side(f.src), dst: side(f.dst) }))
+      .filter(x => x.f.self ? !isEmpty(x.src) : !isEmpty(x.src) && !isEmpty(x.dst));
+    const sgs = S.sgs.filter(g => g.name);
+    const used = new Set(), selfs = {}, edges = [];
+    const ids = (sd) => sd.any ? [ANY] : sd.groups.map(g => g.id);
+    flows.forEach(x => {
+      const k = x.i % FLOW_COLORS.length, c = FLOW_COLORS[k];
+      [x.src, x.dst].forEach(sd => sd.groups.forEach(g => used.add(g.id)));
+      if (x.f.self) { ids(x.src).forEach(a => (selfs[a] = selfs[a] || []).push(x.i + 1)); return; }
+      const lbl = flowLabel(x.f);
+      ids(x.src).forEach(a => ids(x.dst).forEach(b => { if (a !== b || a === ANY) edges.push({ a, b, c, k, lbl, i: x.i }); }));
+    });
+    return { flows, sgs, used, selfs, edges };
+  }
+  function geometry(n) {
+    const rx = Math.max(300, n * 40), ry = Math.max(180, n * 26);
+    const W = 2 * rx + NW + 200, cx = W / 2, cy = NODE_MIN_Y + ry;
+    return { W, H: cy + ry + NH / 2 + 90, cx, cy, rx, ry };
+  }
+  // Ordre sur l'ellipse qui minimise les croisements de flèches (2 cordes se croisent si leurs extrémités alternent)
+  function crossings(order, pairs) {
+    const pos = {}; order.forEach((id, k) => { pos[id] = k; });
+    let c = 0;
+    for (let i = 0; i < pairs.length; i++) for (let j = i + 1; j < pairs.length; j++) {
+      const [a, b] = pairs[i], [d, e] = pairs[j];
+      if (a === d || a === e || b === d || b === e) continue;
+      const lo = Math.min(pos[a], pos[b]), hi = Math.max(pos[a], pos[b]);
+      if ((pos[d] > lo && pos[d] < hi) !== (pos[e] > lo && pos[e] < hi)) c++;
+    }
+    return c;
+  }
+  function bestOrder(ids, pairs) {
+    if (ids.length <= 3 || !pairs.length) return ids;
+    let best = ids.slice(), bestC = crossings(best, pairs);
+    if (ids.length <= 8) {
+      const rest = ids.slice(1);
+      const perm = (arr, k) => {
+        if (!bestC) return;
+        if (k === arr.length) { const o = [ids[0], ...arr], c = crossings(o, pairs); if (c < bestC) { bestC = c; best = o; } return; }
+        for (let i = k; i < arr.length; i++) { [arr[k], arr[i]] = [arr[i], arr[k]]; perm(arr, k + 1); [arr[k], arr[i]] = [arr[i], arr[k]]; }
+      };
+      perm(rest, 0);
+      return best;
+    }
+    for (let improved = true, guard = 0; improved && guard < 50; guard++) {
+      improved = false;
+      for (let i = 0; i < best.length; i++) for (let j = i + 1; j < best.length; j++) {
+        const o = best.slice(); [o[i], o[j]] = [o[j], o[i]];
+        const c = crossings(o, pairs);
+        if (c < bestC) { best = o; bestC = c; improved = true; }
+      }
+    }
+    return best;
+  }
+  function autoLayout(onlyMissing) {
+    const M = diagramModel(), n = M.sgs.length, G = geometry(n);
+    const pairs = [];
+    M.edges.forEach(e => {
+      if (e.a === ANY || e.b === ANY) return;
+      if (!pairs.some(([p, q]) => (p === e.a && q === e.b) || (p === e.b && q === e.a))) pairs.push([e.a, e.b]);
+    });
+    const order = bestOrder(M.sgs.map(g => g.id), pairs);
+    order.forEach((id, k) => {
+      if (onlyMissing && S.layout[id]) return;
+      const a = -Math.PI / 2 + (2 * Math.PI * k) / n + (n === 2 ? Math.PI / 2 : 0);
+      S.layout[id] = n === 1 ? { x: G.cx, y: G.cy } : { x: Math.round(G.cx + G.rx * Math.cos(a)), y: Math.round(G.cy + G.ry * Math.sin(a)) };
+    });
+  }
+
+  let dgSvg = null, drag = null;
   function renderDiagram() {
     const css = getComputedStyle(document.documentElement);
     const C = (v) => css.getPropertyValue(v).trim();
     const col = { text: C('--text'), muted: C('--muted'), panel: C('--panel'), panel2: C('--panel-2'), border: C('--border'), ok: C('--ok'), accent: C('--accent') };
-    const m = S.meta;
-    // Flux complets uniquement
-    const flows = S.flows.map((f, i) => ({ f, i, src: side(f.src), dst: side(f.dst) }))
-      .filter(x => x.f.self ? !isEmpty(x.src) : !isEmpty(x.src) && !isEmpty(x.dst));
-    const used = new Set();
-    flows.forEach(x => [x.src, x.dst].forEach(sd => sd.groups.forEach(g => used.add(g.id))));
-    const anyUsed = flows.some(x => x.src.any || x.dst.any);
-    const sgs = S.sgs.filter(g => g.name);
-    if (!sgs.length && !S.ns) {
+    const m = S.meta, M = diagramModel(), n = M.sgs.length;
+    if (!n && !S.ns) {
       $('diagram').innerHTML = '<p class="empty">Rien à afficher : créez des security groups et des flux.</p>';
-      $('legend').innerHTML = ''; diagramSvg = ''; return;
+      $('legend').innerHTML = ''; dgSvg = null; return;
     }
-    // Disposition : groupes sur une ellipse dans le network, « any » au centre, gateway et extérieur au-dessus
-    const NW = 170, NH = 50, n = sgs.length;
-    const rx = Math.max(290, n * 36), ry = Math.max(175, n * 24);
-    const W = 2 * rx + NW + 120, top = 170;
-    const cx = W / 2, cy = 0;
+    if (M.sgs.some(g => !S.layout[g.id])) autoLayout(true);
+    const G = geometry(n);
+    const clampX = (x) => Math.min(Math.max(x, NW / 2 + 30), G.W - NW / 2 - 30);
+    const clampY = (y) => Math.min(Math.max(y, NODE_MIN_Y), G.H - NH / 2 - 40);
     const nodes = {};
-    sgs.forEach((g, k) => {
-      const a = -Math.PI / 2 + (2 * Math.PI * k) / Math.max(n, 1) + (n === 2 ? Math.PI / 2 : 0);
-      nodes[g.id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), w: NW, h: NH, label: fullName(g),
-        sub: splitList(g.ips).slice(0, 2).join(', ') + (splitList(g.ips).length > 2 ? '…' : ''), dim: !used.has(g.id) };
+    M.sgs.forEach(g => {
+      const L = S.layout[g.id];
+      nodes[g.id] = { id: g.id, x: clampX(L.x), y: clampY(L.y), w: NW, h: NH, label: fullName(g),
+        sub: splitList(g.ips).slice(0, 2).join(', ') + (splitList(g.ips).length > 2 ? '…' : ''), dim: !M.used.has(g.id), selfs: M.selfs[g.id] || [] };
     });
-    if (n === 1) { nodes[sgs[0].id].x = cx - 140; nodes[sgs[0].id].y = cy; }
-    if (anyUsed) nodes[ANY] = { x: n === 1 ? cx + 140 : cx, y: cy, w: NW, h: NH, label: 'any', sub: 'tout le network ' + (m.network || ''), any: true };
-    // Recadrage vertical : place le contenu sous l'en-tête du network, sans espace perdu
-    const all = Object.values(nodes);
-    const minY = Math.min(...all.map(nd => nd.y - nd.h / 2)), maxY = Math.max(...all.map(nd => nd.y + nd.h / 2));
-    const shift = top + 110 - minY;
-    all.forEach(nd => { nd.y += shift; });
-    const H = (all.length ? maxY + shift : top + 110) + 60;
-    const box = { x: 30, y: top, w: W - 60, h: H - top - 30 };
-    const gwNode = { x: W / 2 - 150, y: 60, w: 210, h: NH, label: 'Gateway', sub: m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '(non renseignée)' };
-    const extNode = { x: W / 2 + 150, y: 60, w: 210, h: NH, label: 'Extérieur', sub: '0.0.0.0/0 sauf ' + (m.network || 'network') };
+    const list = Object.values(nodes);
+    // Cadre « any » = le network, qui entoure tous les security groups
+    const fr = list.length
+      ? { x0: Math.min(...list.map(d => d.x - d.w / 2)) - 40, x1: Math.max(...list.map(d => d.x + d.w / 2)) + 40,
+          y0: Math.min(...list.map(d => d.y - d.h / 2)) - 80, y1: Math.max(...list.map(d => d.y + d.h / 2)) + 40 }
+      : { x0: G.W / 2 - 260, x1: G.W / 2 + 260, y0: NODE_MIN_Y - 80, y1: NODE_MIN_Y + 120 };
+    if (fr.x1 - fr.x0 < GW_W + 340) { const mx = (fr.x0 + fr.x1) / 2; fr.x0 = mx - GW_W / 2 - 170; fr.x1 = mx + GW_W / 2 + 170; }
+    const gw = { x: (fr.x0 + fr.x1) / 2, y: fr.y0, w: GW_W, h: NH, label: 'Gateway', sub: m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '(non renseignée)' };
+    const ext = { x: gw.x, y: fr.y0 - 125, w: GW_W, h: NH, label: 'Extérieur', sub: '0.0.0.0/0 sauf ' + (m.network || 'network') };
 
     const out = [];
     const tx = (x, y, str, o = {}) => '<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + (o.anchor || 'middle') + '" font-size="' + (o.size || 13) +
       '" font-weight="' + (o.weight || 400) + '" fill="' + (o.fill || col.text) + '"' + (o.mono ? ' font-family="ui-monospace, Menlo, Consolas, monospace"' : '') + '>' + esc(str) + '</text>';
     const markers = FLOW_COLORS.concat([col.ok]).map((c, k) => '<marker id="ar' + k + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="' + c + '"/></marker>').join('');
-    out.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W.toFixed(0) + ' ' + H.toFixed(0) + '" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" role="img" aria-label="Schéma des flux">');
     out.push('<defs>' + markers + '</defs>');
     out.push('<rect width="100%" height="100%" fill="' + col.panel2 + '"/>');
-    // Zone network
-    out.push('<rect x="' + box.x + '" y="' + box.y + '" width="' + box.w + '" height="' + box.h + '" rx="14" fill="' + col.panel + '" stroke="' + col.border + '" stroke-width="1.5" stroke-dasharray="6 4"/>');
-    out.push(tx(box.x + 14, box.y + 22, 'Network ' + (m.network || '') + (m.ng ? '  ·  ' + NET_LABEL + ': ' + m.ng : ''), { anchor: 'start', size: 12, weight: 600, fill: col.muted }));
-    out.push(tx(box.x + 14, box.y + 40, (m.namespace || '') + (m.nadName ? ' / ' + m.nadName : ''), { anchor: 'start', size: 11, fill: col.muted, mono: true }));
+    out.push('<rect x="' + fr.x0.toFixed(1) + '" y="' + fr.y0.toFixed(1) + '" width="' + (fr.x1 - fr.x0).toFixed(1) + '" height="' + (fr.y1 - fr.y0).toFixed(1) +
+      '" rx="14" fill="' + col.panel + '" stroke="' + col.ok + '" stroke-width="2" stroke-dasharray="8 5"/>');
+    out.push(tx(fr.x0 + 14, fr.y0 + 50, 'any · network ' + (m.network || '') + (m.ng ? ' · ' + NET_LABEL + ': ' + m.ng : ''), { anchor: 'start', size: 12, weight: 700, fill: col.ok }));
+    out.push(tx(fr.x0 + 14, fr.y0 + 67, (m.namespace || '') + (m.nadName ? ' / ' + m.nadName : ''), { anchor: 'start', size: 11, fill: col.muted, mono: true }));
+    // Nord/Sud : les SG passent par la gateway pour joindre l'extérieur
+    if (S.ns) {
+      out.push('<line x1="' + gw.x + '" y1="' + (ext.y + NH / 2 + 4) + '" x2="' + gw.x + '" y2="' + (gw.y - NH / 2 - 4) + '" stroke="' + col.ok +
+        '" stroke-width="2.5" stroke-dasharray="7 5" marker-start="url(#ar' + FLOW_COLORS.length + ')" marker-end="url(#ar' + FLOW_COLORS.length + ')"/>');
+      out.push(tx(gw.x + 14, (ext.y + gw.y) / 2 + 4, 'bypass-nord-sud · tous ports', { anchor: 'start', size: 12, weight: 600, fill: col.ok }));
+    } else out.push(tx(gw.x + 14, (ext.y + gw.y) / 2 + 4, 'Nord/Sud non autorisé', { anchor: 'start', size: 12, fill: col.muted }));
 
-    // Nord/Sud
     const edgeBox = (nd, px, py) => {
       const dx = px - nd.x, dy = py - nd.y;
       if (!dx && !dy) return { x: nd.x, y: nd.y };
       const sc = Math.min((nd.w / 2 + 4) / Math.abs(dx || 1e-9), (nd.h / 2 + 4) / Math.abs(dy || 1e-9));
       return { x: nd.x + dx * sc, y: nd.y + dy * sc };
     };
-    const legend = [];
-    [gwNode, extNode].forEach(nd => {
-      const y2 = box.y;
-      if (S.ns) out.push('<line x1="' + nd.x + '" y1="' + (nd.y + nd.h / 2 + 4) + '" x2="' + nd.x + '" y2="' + (y2 - 4) + '" stroke="' + col.ok + '" stroke-width="2.5" stroke-dasharray="7 5" marker-start="url(#ar' + FLOW_COLORS.length + ')" marker-end="url(#ar' + FLOW_COLORS.length + ')"/>');
-    });
-    if (S.ns) {
-      out.push(tx(W / 2, 128, 'bypass-nord-sud · tous ports', { size: 12, weight: 600, fill: col.ok }));
-      legend.push('<li><span class="sw dash"></span><span><b>Nord/Sud</b> : tout le network ↔ extérieur et gateway, tous ports (<code>' + esc((m.ng ? m.ng + '-' : '') + 'bypass-nord-sud') + '</code>)</span></li>');
-    } else {
-      out.push(tx(W / 2, 128, 'Flux Nord/Sud non autorisé', { size: 12, fill: col.muted }));
-    }
-
-    // Flux Est/Ouest
-    const pairs = {};
-    const edges = [];
-    flows.forEach(x => {
-      const c = FLOW_COLORS[x.i % FLOW_COLORS.length], k = x.i % FLOW_COLORS.length;
-      const ids = (sd) => sd.any ? [ANY] : sd.groups.map(g => g.id);
-      const lbl = x.f.self ? 'self · tous ports' : flowLabel(x.f);
-      if (x.f.self) ids(x.src).forEach(a => edges.push({ a, b: a, c, k, lbl, i: x.i }));
-      else ids(x.src).forEach(a => ids(x.dst).forEach(b => {
-        const key = [a, b].sort().join('|');
-        pairs[key] = (pairs[key] || 0) + 1;
-        edges.push({ a, b, c, k, lbl, key, i: x.i });
-      }));
-      const what = x.f.self ? sideLabel(x.src) + ' ↔ ' + sideLabel(x.src) + ' (allow-self)' : sideLabel(x.src) + ' → ' + sideLabel(x.dst);
-      legend.push('<li><span class="sw" style="background:' + c + '"></span><span><b>Flux ' + (x.i + 1) + '</b> : ' + esc(what) + ' — ' + esc(lbl) +
-        (x.f.desc ? ' <span class="hint">(' + esc(x.f.desc) + ')</span>' : '') + '</span></li>');
-    });
-    const seen = {};
-    const labels = [];
-    edges.forEach(e => {
-      const A = nodes[e.a], B = nodes[e.b]; if (!A || !B) return;
-      if (e.a === e.b) {
-        const lx = A.x - 40, rx2 = A.x + 40, y0 = A.y - A.h / 2 - 2;
-        const lift = 46 + (seen[e.a + '|self'] = (seen[e.a + '|self'] || 0) + 1) * 14;
-        out.push('<path d="M' + lx + ' ' + y0 + ' C' + (lx - 30) + ' ' + (y0 - lift) + ' ' + (rx2 + 30) + ' ' + (y0 - lift) + ' ' + rx2 + ' ' + y0 + '" fill="none" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')"/>');
-        labels.push({ x: A.x, y: y0 - lift * 0.75 - 4, t: e.lbl, c: e.c });
+    // Point du cadre « any » le plus proche d'un SG (en évitant la gateway en haut)
+    const framePoint = (nd) => {
+      const gap = GW_W / 2 + 24, tx0 = Math.abs(nd.x - gw.x) >= gap ? nd.x : gw.x + (nd.x < gw.x ? -gap : gap);
+      const c = [{ x: fr.x0, y: nd.y }, { x: fr.x1, y: nd.y }, { x: nd.x, y: fr.y1 }, { x: tx0, y: fr.y0 }];
+      return c.sort((p, q) => Math.hypot(p.x - nd.x, p.y - nd.y) - Math.hypot(q.x - nd.x, q.y - nd.y))[0];
+    };
+    const pairCount = {}, seen = {}, labels = [];
+    M.edges.forEach(e => { if (e.a !== ANY && e.b !== ANY) { const key = [e.a, e.b].sort().join('|'); pairCount[key] = (pairCount[key] || 0) + 1; } });
+    M.edges.forEach(e => {
+      const title = '<title>Flux ' + (e.i + 1) + ' : ' + esc(e.lbl) + '</title>';
+      if (e.a === ANY || e.b === ANY) {
+        if (e.a === ANY && e.b === ANY) return;
+        const nd = nodes[e.a === ANY ? e.b : e.a]; if (!nd) return;
+        const fp = framePoint(nd), bp = edgeBox(nd, fp.x, fp.y);
+        const [s0, s1] = e.a === ANY ? [fp, bp] : [bp, fp];
+        out.push('<line x1="' + s0.x.toFixed(1) + '" y1="' + s0.y.toFixed(1) + '" x2="' + s1.x.toFixed(1) + '" y2="' + s1.y.toFixed(1) + '" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')">' + title + '</line>');
+        labels.push({ x: (s0.x + s1.x) / 2, y: (s0.y + s1.y) / 2, t: e.lbl, c: e.c });
         return;
       }
-      const [p, q] = e.key.split('|');
-      const P = nodes[p], Q = nodes[q];
-      const idx = (seen[e.key] = (seen[e.key] || 0) + 1) - 1;
-      const total = pairs[e.key];
-      const off = (idx - (total - 1) / 2) * 46;
-      const dx = Q.x - P.x, dy = Q.y - P.y, len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len, ny = dx / len;
+      const A = nodes[e.a], B = nodes[e.b]; if (!A || !B) return;
+      const key = [e.a, e.b].sort().join('|'), [p, q] = key.split('|'), P = nodes[p], Q = nodes[q];
+      const idx = (seen[key] = (seen[key] || 0) + 1) - 1, off = (idx - (pairCount[key] - 1) / 2) * 46;
+      const dx = Q.x - P.x, dy = Q.y - P.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
       const mx = (A.x + B.x) / 2 + nx * off * 2, my = (A.y + B.y) / 2 + ny * off * 2;
       const s0 = edgeBox(A, mx, my), s1 = edgeBox(B, mx, my);
       out.push('<path d="M' + s0.x.toFixed(1) + ' ' + s0.y.toFixed(1) + ' Q' + mx.toFixed(1) + ' ' + my.toFixed(1) + ' ' + s1.x.toFixed(1) + ' ' + s1.y.toFixed(1) +
-        '" fill="none" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')"><title>Flux ' + (e.i + 1) + ' : ' + esc(e.lbl) + '</title></path>');
+        '" fill="none" stroke="' + e.c + '" stroke-width="2.2" marker-end="url(#ar' + e.k + ')">' + title + '</path>');
       labels.push({ x: 0.25 * s0.x + 0.5 * mx + 0.25 * s1.x, y: 0.25 * s0.y + 0.5 * my + 0.25 * s1.y, t: e.lbl, c: e.c });
     });
-
-    // Noeuds
     const drawNode = (nd, o = {}) => {
-      out.push('<g' + (nd.dim ? ' opacity=".45"' : '') + '><title>' + esc(nd.label + (nd.sub ? ' — ' + nd.sub : '')) + '</title>' +
-        '<rect x="' + (nd.x - nd.w / 2).toFixed(1) + '" y="' + (nd.y - nd.h / 2).toFixed(1) + '" width="' + nd.w + '" height="' + nd.h + '" rx="9" fill="' + (o.fill || col.panel) +
-        '" stroke="' + (o.stroke || col.border) + '" stroke-width="' + (o.sw || 1.5) + '"' + (o.dash ? ' stroke-dasharray="5 3"' : '') + '/>' +
-        tx(nd.x, nd.y - 4, trunc(nd.label, 22), { weight: 700, size: 13 }) + tx(nd.x, nd.y + 13, trunc(nd.sub || '', Math.floor((nd.w - 16) / 6.8)), { size: 11, fill: col.muted, mono: true }) + '</g>');
+      out.push('<g' + (o.drag ? ' data-node="' + esc(nd.id) + '" style="cursor:grab;touch-action:none"' : '') + (nd.dim ? ' opacity=".5"' : '') + '><title>' +
+        esc(nd.label + (nd.sub ? ' — ' + nd.sub : '') + (o.drag ? ' (glisser pour déplacer)' : '')) + '</title>' +
+        '<rect x="' + (nd.x - nd.w / 2).toFixed(1) + '" y="' + (nd.y - nd.h / 2).toFixed(1) + '" width="' + nd.w + '" height="' + nd.h + '" rx="9" fill="' + col.panel +
+        '" stroke="' + (o.stroke || col.border) + '" stroke-width="' + (o.sw || 1.8) + '"' + (o.dash ? ' stroke-dasharray="5 3"' : '') + '/>' +
+        tx(nd.x, nd.y - 4, trunc(nd.label, 21), { weight: 700, size: 13 }) +
+        tx(nd.x, nd.y + 14, trunc(nd.sub || '', Math.floor((nd.w - 16) / 6.8)), { size: 11, fill: col.muted, mono: true }));
+      if (nd.selfs && nd.selfs.length) {
+        const bx = nd.x + nd.w / 2 - 22, by = nd.y - nd.h / 2;
+        out.push('<g><title>allow-self (flux ' + nd.selfs.join(', ') + ') : le groupe communique avec lui-même, tous ports</title>' +
+          '<rect x="' + (bx - 22) + '" y="' + (by - 9) + '" width="44" height="18" rx="9" fill="' + col.ok + '"/>' +
+          tx(bx, by + 4, 'self', { size: 11, weight: 700, fill: col.panel }) + '</g>');
+      }
+      out.push('</g>');
     };
-    drawNode(gwNode, { stroke: S.ns ? col.ok : col.border, sw: 2 });
-    drawNode(extNode, { stroke: S.ns ? col.ok : col.border, sw: 2, dash: true });
-    sgs.forEach(g => drawNode(nodes[g.id], { stroke: col.accent }));
-    if (nodes[ANY]) drawNode(nodes[ANY], { stroke: col.ok, dash: true });
-    // Libellés des flux (au-dessus de tout)
+    list.forEach(nd => drawNode(nd, { stroke: col.accent, drag: true }));
+    drawNode(gw, { stroke: S.ns ? col.ok : col.border, sw: 2.2 });
+    drawNode(ext, { stroke: S.ns ? col.ok : col.border, sw: 2.2, dash: true });
     labels.forEach(l => {
       const t = trunc(l.t, 28), w = t.length * 6.6 + 12;
-      out.push('<rect x="' + (l.x - w / 2).toFixed(1) + '" y="' + (l.y - 10).toFixed(1) + '" width="' + w.toFixed(1) + '" height="19" rx="9" fill="' + col.panel + '" stroke="' + l.c + '"/>' +
-        tx(l.x, l.y + 4, t, { size: 11, weight: 600, fill: l.c }));
+      out.push('<g pointer-events="none"><rect x="' + (l.x - w / 2).toFixed(1) + '" y="' + (l.y - 10).toFixed(1) + '" width="' + w.toFixed(1) + '" height="19" rx="9" fill="' + col.panel + '" stroke="' + l.c + '"/>' +
+        tx(l.x, l.y + 4, t, { size: 11, weight: 600, fill: l.c }) + '</g>');
     });
-    out.push('</svg>');
-    diagramSvg = out.join('');
-    $('diagram').innerHTML = diagramSvg;
+    // Le SVG reste le même élément pendant un glisser-déposer
+    const top = ext.y - NH / 2 - 20, H = fr.y1 + 30;
+    if (!dgSvg || !dgSvg.isConnected) {
+      $('diagram').innerHTML = '';
+      dgSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      dgSvg.setAttribute('role', 'img'); dgSvg.setAttribute('aria-label', 'Schéma des flux');
+      dgSvg.setAttribute('font-family', 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif');
+      bindDrag(dgSvg);
+      $('diagram').appendChild(dgSvg);
+    }
+    if (!drag) dgSvg.setAttribute('viewBox', '0 ' + top.toFixed(0) + ' ' + G.W.toFixed(0) + ' ' + (H - top).toFixed(0));
+    dgSvg.innerHTML = out.join('');
+
+    const legend = [];
+    if (S.ns) legend.push('<li><span class="sw dash"></span><span><b>Nord/Sud</b> : tout le network ↔ gateway ↔ extérieur, tous ports (<code>' + esc((m.ng ? m.ng + '-' : '') + 'bypass-nord-sud') + '</code>)</span></li>');
+    M.flows.forEach(x => {
+      const what = x.f.self ? sideLabel(x.src) + ' (allow-self, pastille « self »)' : sideLabel(x.src) + ' → ' + sideLabel(x.dst);
+      legend.push('<li><span class="sw" style="background:' + (x.f.self ? col.ok : FLOW_COLORS[x.i % FLOW_COLORS.length]) + '"></span><span><b>Flux ' + (x.i + 1) + '</b> : ' + esc(what) +
+        ' — ' + esc(x.f.self ? 'tous ports' : flowLabel(x.f)) + (x.f.desc ? ' <span class="hint">(' + esc(x.f.desc) + ')</span>' : '') + '</span></li>');
+    });
     $('legend').innerHTML = legend.join('') || '<li class="hint">Aucun flux complet à afficher.</li>';
   }
-  $('svgBtn').onclick = () => { if (diagramSvg) download((S.meta.ng || S.meta.nadName || 'flux') + '-schema.svg', diagramSvg, 'image/svg+xml'); };
+  function bindDrag(svg) {
+    const pt = (e) => {
+      const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+      return { x: vb.x + (e.clientX - r.left) * vb.width / r.width, y: vb.y + (e.clientY - r.top) * vb.height / r.height };
+    };
+    svg.addEventListener('pointerdown', (e) => {
+      const g = e.target.closest('[data-node]'); if (!g || e.button > 0) return;
+      const id = g.dataset.node, L = S.layout[id], p = pt(e);
+      drag = { id, dx: p.x - L.x, dy: p.y - L.y };
+      svg.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const p = pt(e), G = geometry(S.sgs.filter(g => g.name).length);
+      S.layout[drag.id] = { x: Math.round(Math.min(Math.max(p.x - drag.dx, NW / 2 + 30), G.W - NW / 2 - 30)),
+        y: Math.round(Math.min(Math.max(p.y - drag.dy, NODE_MIN_Y), G.H - NH / 2 - 40)) };
+      renderDiagram();
+    });
+    const end = () => { if (!drag) return; drag = null; renderDiagram(); save(); };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+  }
+  $('relayoutBtn').onclick = () => { S.layout = {}; autoLayout(false); renderDiagram(); save(); };
+  $('svgBtn').onclick = () => {
+    if (!dgSvg) return;
+    const xml = new XMLSerializer().serializeToString(dgSvg).replace(/ style="cursor:grab;touch-action:none"/g, '');
+    download((S.meta.ng || S.meta.nadName || 'flux') + '-schema.svg', '<?xml version="1.0" encoding="UTF-8"?>\n' + xml, 'image/svg+xml');
+  };
 
   function goStep(n) {
     S.step = n;
@@ -1063,6 +1158,9 @@
     if (Array.isArray(d.flows)) o.flows = d.flows.filter(f => f && f.type !== 'ns').map(f => ({ id: str(f.id) || uid(),
       src: ids(f.src), dst: ids(f.dst), desc: str(f.desc), self: !!f.self,
       ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: PROTOS.includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
+    if (d.layout && typeof d.layout === 'object') Object.entries(d.layout).forEach(([k, v]) => {
+      if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) o.layout[k] = { x: v.x, y: v.y };
+    });
     o.step = [1, 2, 3, 4, 5].includes(d.step) ? d.step : 1;
     return o;
   }
