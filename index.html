@@ -180,23 +180,23 @@
   <p class="lead">Où les règles s'appliquent : le namespace des pods et le réseau secondaire (NAD) filtré.</p>
   <div class="grid2">
     <label class="field"><span>Namespace</span>
-      <input type="text" id="m_namespace" spellcheck="false" placeholder="ex. dc-elsan-eds">
+      <input type="text" id="m_namespace" spellcheck="false" placeholder="ex. mon-namespace">
       <div class="hint">Namespace des pods protégés et de la NAD ; les MultiNetworkPolicy y sont créées.</div>
     </label>
     <label class="field"><span>Nom de la NAD</span>
-      <input type="text" id="m_nadName" spellcheck="false" placeholder="ex. eds-promptly-travail-10-235-10-0-24">
+      <input type="text" id="m_nadName" spellcheck="false" placeholder="ex. mon-nad-192-0-2-0-24">
     </label>
     <label class="field"><span>Network Group</span>
-      <input type="text" id="m_ng" spellcheck="false" placeholder="ex. eds-ptl">
+      <input type="text" id="m_ng" spellcheck="false" placeholder="ex. mon-ng">
       <div class="hint">Préfixe des security groups et des policies. Valeur du label <code>neos/vm.dfw-network</code> utilisé pour « any ».</div>
     </label>
     <span></span>
     <label class="field"><span>Network</span>
-      <input type="text" id="m_network" spellcheck="false" placeholder="ex. 10.235.10.0/24">
+      <input type="text" id="m_network" spellcheck="false" placeholder="ex. 192.0.2.0/24">
       <div class="hint">CIDR du réseau. Utilisé pour « any » et pour l'exception des flux Nord/Sud.</div>
     </label>
     <label class="field"><span>Gateway</span>
-      <input type="text" id="m_gateway" spellcheck="false" placeholder="ex. 10.235.10.1">
+      <input type="text" id="m_gateway" spellcheck="false" placeholder="ex. 192.0.2.1">
       <div class="hint">IP de la passerelle du network, autorisée dans les flux Nord/Sud.</div>
     </label>
   </div>
@@ -690,7 +690,7 @@
         '<button type="button" class="danger small" data-del>Supprimer</button></div>' +
         '<label class="field"><span>Nom du groupe</span><span class="prefixed"><span class="pfx" data-pfx></span><input type="text" data-f="name" spellcheck="false" placeholder="ex. front"></span></label>' +
         '<label class="field" style="margin-top:10px"><span>IP / réseaux</span>' +
-          '<textarea data-f="ips" rows="3" spellcheck="false" placeholder="10.235.10.12&#10;10.235.10.13&#10;10.235.20.0/24"></textarea>' +
+          '<textarea data-f="ips" rows="3" spellcheck="false" placeholder="192.0.2.10&#10;192.0.2.11&#10;198.51.100.0/24"></textarea>' +
           '<div class="hint">Une entrée par ligne (ou séparées par virgule). IP seule = /32. Ce sont les IP utilisées quand le groupe est l\'autre extrémité d\'un flux.</div></label>' +
         '<div class="field" style="margin-top:10px"><span class="flabel">podSelector</span>' +
           '<code class="selector" data-sel></code>' +
