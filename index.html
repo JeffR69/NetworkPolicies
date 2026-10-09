@@ -114,6 +114,36 @@
   .prefixed .pfx:empty { display: none; }
   .prefixed .pfx:not(:empty) + input { border-radius: 0 6px 6px 0; }
   code.selector { display: block; padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel); }
+  .tag.ns { color: var(--ok); }
+  .flow-type { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .flow-type select { width: auto; padding: 4px 8px; font-size: 13px; }
+  .fixed-peers { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+  /* Liste déroulante avec recherche (simple ou multiple) */
+  .pk { position: relative; }
+  .pk-box { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-height: 38px; padding: 4px 30px 4px 6px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--panel); cursor: text; position: relative; }
+  .pk-box::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+  .pk-box:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .pk-box input.pk-in { flex: 1 1 80px; min-width: 80px; border: none; padding: 4px; background: transparent; outline: none; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 12px; font-size: 13px;
+    background: var(--accent); color: var(--accent-text); max-width: 100%; }
+  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip.any { background: var(--ok); }
+  .chip button { border: none; background: none; color: inherit; padding: 0 4px; font-size: 14px; line-height: 1; }
+  .pk-pop { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); max-height: 280px; overflow-y: auto; }
+  .pk-list { list-style: none; margin: 0; padding: 4px; }
+  .pk-list li { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  .pk-list li.active { background: var(--panel-2); }
+  .pk-list li .ck { width: 16px; flex: none; text-align: center; color: var(--accent); font-weight: 700; }
+  .pk-list li .lb { flex: 1; min-width: 0; }
+  .pk-list li .lb small { color: var(--muted); margin-left: 6px; }
+  .pk-list li .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+  .pk-list li button { border: none; background: none; color: var(--error); padding: 0 4px; }
+  .pk-list li.none { color: var(--muted); font-style: italic; cursor: default; }
+  .svc-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; }
+  @media (max-width: 560px) { .svc-bar { grid-template-columns: 1fr; } }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -134,10 +164,10 @@
 </header>
 
 <nav class="steps" aria-label="Étapes">
-  <button type="button" data-step="1"><span class="num">1</span><span class="lbl"><b>Contexte</b><small>Namespace, NAD, network group</small></span></button>
+  <button type="button" data-step="1"><span class="num">1</span><span class="lbl"><b>Contexte</b><small>Namespace, NAD, network</small></span></button>
   <button type="button" data-step="2"><span class="num">2</span><span class="lbl"><b>Security groups</b><small id="sgCount">0 groupe</small></span></button>
   <button type="button" data-step="3"><span class="num">3</span><span class="lbl"><b>Flux</b><small id="flowCount">0 flux</small></span></button>
-  <button type="button" data-step="4"><span class="num">4</span><span class="lbl"><b>YAML</b><small id="polCount">0 policy</small></span></button>
+  <button type="button" data-step="4"><span class="num">4</span><span class="lbl"><b>YAML</b><small id="polCount">0 objet</small></span></button>
 </nav>
 
 <!-- ÉTAPE 1 -->
@@ -153,12 +183,22 @@
       <input type="text" id="m_nadName" spellcheck="false" placeholder="ex. eds-promptly-travail-10-235-10-0-24">
     </label>
     <label class="field"><span>Network Group</span>
-      <input type="text" id="m_ng" spellcheck="false" placeholder="ex. promptly">
-      <div class="hint">Préfixe des security groups : <code>&lt;network-group&gt;-&lt;groupe&gt;</code>. Il commence aussi le nom des policies générées.</div>
+      <input type="text" id="m_ng" spellcheck="false" placeholder="ex. eds-ptl">
+      <div class="hint">Préfixe des security groups et des policies. Valeur du label <code>neos/vm.dfw-network</code> utilisé pour « any ».</div>
+    </label>
+    <span></span>
+    <label class="field"><span>Network</span>
+      <input type="text" id="m_network" spellcheck="false" placeholder="ex. 10.235.10.0/24">
+      <div class="hint">CIDR du réseau. Utilisé pour « any » et pour l'exception des flux Nord/Sud.</div>
+    </label>
+    <label class="field"><span>Gateway</span>
+      <input type="text" id="m_gateway" spellcheck="false" placeholder="ex. 10.235.10.1">
+      <div class="hint">IP de la passerelle du network, autorisée dans les flux Nord/Sud.</div>
     </label>
   </div>
   <p class="hint" id="annotPreview"></p>
   <ul class="msgs err" id="err1" style="margin-top:12px"></ul>
+  <ul class="msgs warn" id="warn1"></ul>
   <div class="navbtns"><span></span><button type="button" class="primary" data-go="2">Suivant : security groups →</button></div>
 </section>
 
@@ -181,14 +221,15 @@
 <!-- ÉTAPE 3 -->
 <section class="card" data-panel="3" hidden>
   <h2>3. Flux autorisés</h2>
-  <p class="lead">Chaque flux autorise une source à joindre une destination sur des ports. Tout ce qui n'est pas listé est bloqué
-    pour les pods filtrés.</p>
+  <p class="lead">Est/Ouest : entre security groups (un ingress et un egress séparés).
+    Nord/Sud : vers l'extérieur et la gateway du network (un seul objet ingress + egress).</p>
   <div id="flowList"></div>
   <ul class="msgs err" id="err3"></ul>
   <div class="navbtns">
     <button type="button" data-go="2">← Security groups</button>
     <span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-      <button type="button" id="addFlow">+ Ajouter un flux</button>
+      <button type="button" id="addFlow">+ Flux Est/Ouest</button>
+      <button type="button" id="addNs">+ Flux Nord/Sud</button>
       <button type="button" class="primary" data-go="4">Générer le YAML →</button>
     </span>
   </div>
@@ -197,7 +238,8 @@
 <!-- ÉTAPE 4 -->
 <section class="card" data-panel="4" hidden>
   <h2>4. YAML généré</h2>
-  <p class="lead">Deux objets par flux : un ingress sur le groupe destination, un egress sur le groupe source. Jamais d'ingress et d'egress dans la même MultiNetworkPolicy.</p>
+  <p class="lead">Est/Ouest : un ingress sur la destination et un egress sur la source, dans deux objets distincts.
+    Nord/Sud : un seul objet avec ingress et egress.</p>
   <ul class="msgs err" id="err4"></ul>
   <ul class="msgs warn" id="warn4"></ul>
   <div class="table-wrap"><table id="polTable"></table></div>
@@ -216,19 +258,70 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const STORE_KEY = 'mnp-sg-generator-v2';
+  const SVC_KEY = 'mnp-services-v1';
   const uid = () => Math.random().toString(36).slice(2, 9);
 
-  const blank = () => ({
-    meta: { namespace: '', nadName: '', ng: '' },
-    sgs: [], flows: [], step: 1,
-  });
+  const SG_LABEL = 'neos/vm.dfw-sg';
+  const NET_LABEL = 'neos/vm.dfw-network';
+  const ANY = '*any*';
+  // Séparateur des noms d'application : « _ » est refusé par l'API Kubernetes (RFC 1123), « . » est accepté.
+  const NA_SEP = '.';
+  const PROTOS = ['TCP', 'UDP', 'SCTP'];
+
+  const META = ['namespace', 'nadName', 'ng', 'network', 'gateway'];
+  const blank = () => ({ meta: { namespace: '', nadName: '', ng: '', network: '', gateway: '' }, sgs: [], flows: [], step: 1 });
   let S = blank();
+
+  /* ================= Services prédéfinis ================= */
+  // [nom d'application, libellé, [[protocole, port, fin de plage?], ...]]
+  const PRESETS = [
+    ['ftp', 'FTP', [['TCP', 21]]], ['ssh', 'SSH', [['TCP', 22]]], ['telnet', 'Telnet', [['TCP', 23]]],
+    ['smtp', 'SMTP', [['TCP', 25]]], ['dns', 'DNS', [['UDP', 53], ['TCP', 53]]], ['dhcp', 'DHCP', [['UDP', 67, 68]]],
+    ['tftp', 'TFTP', [['UDP', 69]]], ['http', 'HTTP', [['TCP', 80]]], ['kerberos', 'Kerberos', [['TCP', 88], ['UDP', 88]]],
+    ['pop3', 'POP3', [['TCP', 110]]], ['ntp', 'NTP', [['UDP', 123]]], ['msrpc', 'MS RPC', [['TCP', 135]]],
+    ['netbios', 'NetBIOS', [['UDP', 137, 138], ['TCP', 139]]], ['imap', 'IMAP', [['TCP', 143]]],
+    ['snmp', 'SNMP', [['UDP', 161]]], ['snmp-trap', 'SNMP Trap', [['UDP', 162]]], ['ldap', 'LDAP', [['TCP', 389], ['UDP', 389]]],
+    ['https', 'HTTPS', [['TCP', 443]]], ['smb', 'SMB / CIFS', [['TCP', 445]]], ['smtps', 'SMTPS', [['TCP', 465]]],
+    ['syslog', 'Syslog', [['UDP', 514]]], ['submission', 'SMTP Submission', [['TCP', 587]]], ['ldaps', 'LDAPS', [['TCP', 636]]],
+    ['imaps', 'IMAPS', [['TCP', 993]]], ['pop3s', 'POP3S', [['TCP', 995]]], ['mssql', 'Microsoft SQL Server', [['TCP', 1433]]],
+    ['oracle', 'Oracle DB', [['TCP', 1521]]], ['nfs', 'NFS', [['TCP', 2049], ['UDP', 2049]]],
+    ['ldap-gc', 'LDAP Global Catalog', [['TCP', 3268, 3269]]], ['mysql', 'MySQL / MariaDB', [['TCP', 3306]]],
+    ['rdp', 'RDP', [['TCP', 3389], ['UDP', 3389]]], ['postgres', 'PostgreSQL', [['TCP', 5432]]],
+    ['amqps', 'AMQPS', [['TCP', 5671]]], ['amqp', 'AMQP / RabbitMQ', [['TCP', 5672]]], ['vnc', 'VNC', [['TCP', 5900]]],
+    ['winrm', 'WinRM', [['TCP', 5985, 5986]]], ['redis', 'Redis', [['TCP', 6379]]], ['k8s-api', 'Kubernetes API', [['TCP', 6443]]],
+    ['syslog-tls', 'Syslog TLS', [['TCP', 6514]]], ['http-alt', 'HTTP alternatif', [['TCP', 8080]]],
+    ['https-alt', 'HTTPS alternatif', [['TCP', 8443]]], ['prometheus', 'Prometheus', [['TCP', 9090]]],
+    ['kafka', 'Kafka', [['TCP', 9092]]], ['node-exporter', 'Node exporter', [['TCP', 9100]]],
+    ['elasticsearch', 'Elasticsearch', [['TCP', 9200]]], ['zabbix', 'Zabbix', [['TCP', 10050, 10051]]],
+    ['mongodb', 'MongoDB', [['TCP', 27017]]],
+  ].map(([name, label, ports]) => ({ name, label, ports: ports.map(([p, a, b]) => [p, String(a), b ? String(b) : '']) }));
+  const PRESET_NAMES = new Set(PRESETS.map(s => s.name));
+  let custom = [];
+  const fmtPorts = (ports) => ports.map(([p, a, b]) => p + '/' + a + (b ? '-' + b : '')).join(', ');
+  function sanitizeServices(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter(s => s && typeof s.name === 'string' && /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(s.name) && Array.isArray(s.ports))
+      .map(s => ({ name: s.name, label: s.name, ports: s.ports.filter(t => Array.isArray(t) && PROTOS.includes(t[0]) && typeof t[1] === 'string')
+        .map(t => [t[0], t[1], typeof t[2] === 'string' ? t[2] : '']) }))
+      .filter(s => s.ports.length);
+  }
+  function saveServices() { try { localStorage.setItem(SVC_KEY, JSON.stringify(custom)); } catch (e) {} }
+  function mergeServices(list) {
+    for (const s of sanitizeServices(list)) {
+      if (PRESET_NAMES.has(s.name)) continue;
+      const c = custom.find(x => x.name === s.name);
+      if (!c) custom.push(s);
+      else s.ports.forEach(t => { if (!c.ports.some(u => u.join('|') === t.join('|'))) c.ports.push(t); });
+    }
+    saveServices();
+  }
+  try { custom = sanitizeServices(JSON.parse(localStorage.getItem(SVC_KEY))); } catch (e) { custom = []; }
+  const allServices = () => [...PRESETS, ...custom.map(s => ({ ...s, custom: true }))]
+    .sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
 
   /* ================= Validation de base ================= */
   const DNS_SUB = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
   const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
-  const LABEL_KEY = /^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
-  const LABEL_VAL = /^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])?$/;
 
   function parseV4(s) {
     const p = s.split('.'); if (p.length !== 4) return null;
@@ -237,11 +330,12 @@
     return n;
   }
   const v4str = (n) => [24, 16, 8, 0].map(s => (n >>> s) & 255).join('.');
+  const maskOf = (bits) => bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
   function isV6(s) {
     if (!/^[0-9a-fA-F:.]+$/.test(s) || !s.includes(':')) return false;
     try { new URL('http://[' + s + ']/'); return true; } catch (e) { return false; }
   }
-  // Normalise une entrée IP ou CIDR -> {ok, cidr, msg}
+  // Normalise une entrée IP ou CIDR -> {ok, cidr, v4, addr, bits, msg}
   function normIp(raw) {
     const s = raw.trim();
     const m = s.match(/^([^/]+)(?:\/(\d{1,3}))?$/);
@@ -250,51 +344,93 @@
     if (v4 !== null) {
       const bits = m[2] === undefined ? 32 : +m[2];
       if (bits > 32) return { ok: false, msg: 'masque > 32' };
-      const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
-      if (((v4 & mask) >>> 0) !== v4) return { ok: false, msg: 'bits d\'hôte non nuls, réseau attendu ' + v4str((v4 & mask) >>> 0) + '/' + bits };
-      return { ok: true, cidr: v4str(v4) + '/' + bits };
+      if (((v4 & maskOf(bits)) >>> 0) !== v4) return { ok: false, msg: 'bits d\'hôte non nuls, réseau attendu ' + v4str((v4 & maskOf(bits)) >>> 0) + '/' + bits };
+      return { ok: true, cidr: v4str(v4) + '/' + bits, v4: true, addr: v4, bits };
     }
     if (isV6(m[1])) {
       const bits = m[2] === undefined ? 128 : +m[2];
       if (bits > 128) return { ok: false, msg: 'masque > 128' };
-      return { ok: true, cidr: m[1].toLowerCase() + '/' + bits };
+      return { ok: true, cidr: m[1].toLowerCase() + '/' + bits, v4: false };
     }
     return { ok: false, msg: 'adresse IP invalide' };
   }
   const splitList = (txt) => txt.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
-  const SG_LABEL = 'neos/vm.dfw-sg';
+  // Valide une ligne de port ; renvoie un message d'erreur ou ''
+  function portError(p) {
+    const numeric = /^\d+$/.test(p.port);
+    if (p.app && !(p.app.length <= 63 && DNS_LABEL.test(p.app))) return 'nom d\'application « ' + p.app + ' » invalide (minuscules, chiffres, « - »)';
+    if (p.port === '' && p.endPort === '') return '';
+    if (p.port === '') return 'port de début manquant';
+    if (numeric && (+p.port < 1 || +p.port > 65535)) return 'port hors plage 1-65535';
+    if (!numeric && !(p.port.length <= 15 && DNS_LABEL.test(p.port) && /[a-z]/.test(p.port))) return 'port nommé « ' + p.port + ' » invalide';
+    if (p.endPort !== '') {
+      if (!numeric) return 'une plage exige un port numérique';
+      if (!/^\d+$/.test(p.endPort) || +p.endPort > 65535 || +p.endPort < +p.port) return 'fin de plage doit être ≥ début et ≤ 65535';
+    }
+    return '';
+  }
+  // Mémorise un service saisi à la main pour le proposer ensuite dans la liste
+  function learnService(p) {
+    if (!p.app || !p.port || portError(p) || PRESET_NAMES.has(p.app)) return;
+    const t = [p.protocol, p.port, p.endPort && p.endPort !== p.port ? p.endPort : ''];
+    const c = custom.find(s => s.name === p.app);
+    if (!c) custom.push({ name: p.app, label: p.app, ports: [t] });
+    else if (!c.ports.some(u => u.join('|') === t.join('|'))) c.ports.push(t);
+    else return;
+    saveServices();
+  }
+
   const sgById = (id) => S.sgs.find(g => g.id === id);
   const fullName = (g) => (S.meta.ng ? S.meta.ng + '-' : '') + g.name;
-  // Séparateur des noms d'application : « _ » est refusé par l'API Kubernetes (RFC 1123), « . » est accepté.
-  const NA_SEP = '.';
-  const names = (gs) => gs.map(g => g.name).join('-');
+  const sgLabel = (g) => g ? (g.name ? fullName(g) : '(sans nom)') : '(groupe supprimé)';
+  const side = (ids) => ({ any: ids.includes(ANY), groups: ids.filter(x => x !== ANY).map(sgById).filter(Boolean) });
+  const isEmpty = (sd) => !sd.any && !sd.groups.length;
+  const sideName = (sd) => sd.any ? 'any' : sd.groups.map(g => g.name).join('-');
+  const sideLabel = (sd) => sd.any ? 'any' : sd.groups.map(fullName).join(', ');
   function polName(p) {
     const ng = S.meta.ng ? S.meta.ng + '-' : '';
     const apps = [...new Set(p.apps)];
     const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
+    if (p.dir === 'both') return ng + sideName(p.src) + '-north-south' + suffix;
     return p.dir === 'ingress'
-      ? ng + names(p.dsts) + '-ingress-from-' + names(p.srcs) + suffix
-      : ng + names(p.srcs) + '-egress-to-' + names(p.dsts) + suffix;
+      ? ng + sideName(p.dst) + '-ingress-from-' + sideName(p.src) + suffix
+      : ng + sideName(p.src) + '-egress-to-' + sideName(p.dst) + suffix;
   }
-  const sgLabel = (g) => g ? (g.name ? fullName(g) : '(sans nom)') : '(groupe supprimé)';
 
   /* ================= Modèle -> politiques ================= */
   function analyse() {
-    const errs = { 1: [], 2: [], 3: [] }, warns = [];
+    const errs = { 1: [], 2: [], 3: [] }, warns = [], warns1 = [];
     const m = S.meta;
     if (!m.namespace || m.namespace.length > 63 || !DNS_LABEL.test(m.namespace)) errs[1].push('Namespace invalide (DNS-1123, 63 car. max).');
-    if (m.ng && (m.ng.length > 40 || !DNS_LABEL.test(m.ng))) errs[1].push('Network Group invalide (minuscules, chiffres, « - », 40 car. max).');
     if (!m.nadName || !DNS_SUB.test(m.nadName)) errs[1].push('Nom de la NAD invalide.');
+    if (m.ng && (m.ng.length > 40 || !DNS_LABEL.test(m.ng))) errs[1].push('Network Group invalide (minuscules, chiffres, « - », 40 car. max).');
+    let net = null, gw = null;
+    const bad = { network: false, gateway: false };
+    if (m.network) {
+      const r = normIp(m.network);
+      if (!r.ok) { errs[1].push('Network : ' + r.msg + '.'); bad.network = true; }
+      else if (!r.v4) { errs[1].push('Network : seul l\'IPv4 est géré.'); bad.network = true; }
+      else net = r;
+    }
+    if (m.gateway) {
+      const a = parseV4(m.gateway.replace(/\/32$/, ''));
+      if (a === null) { errs[1].push('Gateway : adresse IPv4 attendue (sans masque).'); bad.gateway = true; }
+      else {
+        gw = v4str(a);
+        if (net && ((a & maskOf(net.bits)) >>> 0) !== net.addr) warns1.push('La gateway ' + gw + ' n\'est pas dans le network ' + net.cidr + '.');
+      }
+    }
 
     const sgInfo = {};
-    const names = new Set();
+    const seenNames = new Set();
     S.sgs.forEach((g, i) => {
       const where = 'Groupe « ' + sgLabel(g) + ' »';
       const info = { cidrs: [], badIps: false, badName: false };
       if (!g.name || !DNS_LABEL.test(g.name)) { errs[2].push('Groupe ' + (i + 1) + ' : nom invalide (minuscules, chiffres, « - »).'); info.badName = true; }
+      else if (g.name === 'any') { errs[2].push('Groupe ' + (i + 1) + ' : « any » est réservé.'); info.badName = true; }
       else if (fullName(g).length > 63) { errs[2].push(where + ' : 63 caractères max avec le préfixe (valeur du label ' + SG_LABEL + ').'); info.badName = true; }
-      else if (names.has(g.name)) { errs[2].push('Nom de groupe en double : « ' + g.name + ' ».'); info.badName = true; }
-      names.add(g.name);
+      else if (seenNames.has(g.name)) { errs[2].push('Nom de groupe en double : « ' + g.name + ' ».'); info.badName = true; }
+      seenNames.add(g.name);
       const seen = new Set();
       for (const raw of splitList(g.ips)) {
         const r = normIp(raw);
@@ -304,48 +440,49 @@
       if (!info.cidrs.length && !info.badIps) { errs[2].push(where + ' : au moins une IP est requise.'); info.badIps = true; }
       sgInfo[g.id] = info;
     });
+    const cidrsOf = (gs) => [...new Set(gs.flatMap(g => sgInfo[g.id].cidrs))];
 
-    // Une policy par flux et par sens
     const pols = [];
     const flowState = {};
     S.flows.forEach((f, i) => {
-      const where = 'Flux ' + (i + 1);
-      const srcs = f.src.map(sgById).filter(Boolean), dsts = f.dst.map(sgById).filter(Boolean);
+      const ns = f.type === 'ns';
+      const where = (ns ? 'Flux Nord/Sud ' : 'Flux ') + (i + 1);
       const fe = { src: false, dst: false, ports: new Set(), effects: [] };
       flowState[f.id] = fe;
-      if (!srcs.length) { errs[3].push(where + ' : choisissez au moins une source.'); fe.src = true; }
-      if (!dsts.length) { errs[3].push(where + ' : choisissez au moins une destination.'); fe.dst = true; }
-      // Ports
+      const src = side(f.src), dst = side(f.dst);
       const ports = [], apps = [];
       f.ports.forEach((p, qi) => {
-        const pw = where + ', port ' + (qi + 1);
-        const numeric = /^\d+$/.test(p.port);
-        let bad = false;
-        if (p.app && !(p.app.length <= 63 && DNS_LABEL.test(p.app))) { errs[3].push(pw + ' : nom d\'application « ' + p.app + ' » invalide (minuscules, chiffres, « - »).'); bad = true; }
-        if (p.port === '' && p.endPort === '') { if (bad) fe.ports.add(qi); else if (p.app) apps.push(p.app); return; }
-        if (p.port === '') { errs[3].push(pw + ' : port de début manquant.'); bad = true; }
-        else if (numeric && (+p.port < 1 || +p.port > 65535)) { errs[3].push(pw + ' : port hors plage 1-65535.'); bad = true; }
-        else if (!numeric && !(p.port.length <= 15 && DNS_LABEL.test(p.port) && /[a-z]/.test(p.port))) { errs[3].push(pw + ' : port nommé « ' + p.port + ' » invalide.'); bad = true; }
-        if (!bad && p.endPort !== '') {
-          if (!numeric) { errs[3].push(pw + ' : une plage exige un port numérique.'); bad = true; }
-          else if (!/^\d+$/.test(p.endPort) || +p.endPort > 65535 || +p.endPort < +p.port) { errs[3].push(pw + ' : fin de plage doit être ≥ début et ≤ 65535.'); bad = true; }
-        }
-        if (bad) fe.ports.add(qi);
-        else { ports.push({ protocol: p.protocol, port: p.port, endPort: p.endPort && p.endPort !== p.port ? p.endPort : '', app: p.app }); if (p.app) apps.push(p.app); }
+        const e = portError(p);
+        if (e) { errs[3].push(where + ', port ' + (qi + 1) + ' : ' + e + '.'); fe.ports.add(qi); return; }
+        if (p.app) apps.push(p.app);
+        if (p.port) ports.push({ protocol: p.protocol, port: p.port, endPort: p.endPort && p.endPort !== p.port ? p.endPort : '', app: p.app });
       });
-      if (!srcs.length || !dsts.length) return;
-      const list = (gs) => gs.map(sgLabel).join(', ');
-      if (!ports.length) warns.push(where + ' (' + list(srcs) + ' → ' + list(dsts) + ') : aucun port, tous les ports et protocoles sont autorisés.');
-      const cidrsOf = (gs) => [...new Set(gs.flatMap(g => sgInfo[g.id].cidrs))];
-      const mk = (dir, targets, peers) => {
-        const pol = { dir, targets, srcs, dsts, flow: f, idx: i + 1, peers, ports, apps };
+      let ok = true;
+      const err = (msg, key) => { errs[3].push(where + ' : ' + msg); if (key) fe[key] = true; ok = false; };
+      const mk = (dir, target, peers) => {
+        const pol = { dir, target, src, dst, flow: f, idx: i + 1, peers, ports, apps, ns };
         pol.name = polName(pol); pols.push(pol); fe.effects.push(pol);
       };
-      const srcIps = cidrsOf(srcs), dstIps = cidrsOf(dsts);
-      if (!srcIps.length) { errs[3].push(where + ' : les sources n\'ont aucune IP valide, impossible d\'écrire la règle ingress.'); fe.src = true; }
-      else mk('ingress', dsts, srcIps);
-      if (!dstIps.length) { errs[3].push(where + ' : les destinations n\'ont aucune IP valide, impossible d\'écrire la règle egress.'); fe.dst = true; }
-      else mk('egress', srcs, dstIps);
+      if (ns) {
+        if (isEmpty(src)) err('choisissez au moins un security group (ou any).', 'src');
+        if (!net) err('renseignez un Network valide à l\'étape 1.');
+        if (!gw) err('renseignez une Gateway valide à l\'étape 1.');
+        if (src.any && !m.ng) err('« any » nécessite un Network Group (étape 1).', 'src');
+        if (!ok) return;
+        if (!ports.length) warns.push(where + ' (' + sideLabel(src) + ') : aucun port, tous les ports et protocoles sont autorisés vers et depuis l\'extérieur.');
+        mk('both', src, [{ cidr: '0.0.0.0/0', except: [net.cidr] }, { cidr: gw + '/32' }]);
+        return;
+      }
+      if (isEmpty(src)) err('choisissez au moins une source.', 'src');
+      if (isEmpty(dst)) err('choisissez au moins une destination.', 'dst');
+      if ((src.any || dst.any) && !net) err('« any » nécessite un Network valide (étape 1).', src.any ? 'src' : 'dst');
+      if ((src.any || dst.any) && !m.ng) err('« any » nécessite un Network Group (étape 1).', src.any ? 'src' : 'dst');
+      if (!ok) return;
+      if (!ports.length) warns.push(where + ' (' + sideLabel(src) + ' → ' + sideLabel(dst) + ') : aucun port, tous les ports et protocoles sont autorisés.');
+      const peersOf = (sd) => sd.any ? [{ cidr: net.cidr }] : cidrsOf(sd.groups).map(c => ({ cidr: c }));
+      const inPeers = peersOf(src), outPeers = peersOf(dst);
+      if (!inPeers.length) err('les sources n\'ont aucune IP valide.', 'src'); else mk('ingress', dst, inPeers);
+      if (!outPeers.length) err('les destinations n\'ont aucune IP valide.', 'dst'); else mk('egress', src, outPeers);
     });
 
     S.sgs.forEach(g => {
@@ -364,14 +501,15 @@
       const u = [...new Set(idx)];
       if (u.length > 1) errs[3].push('Flux ' + u.join(', ') + ' : même nom de policy « ' + name + ' ». Différenciez-les par les noms d\'application ou regroupez les ports dans un seul flux.');
     });
-    return { errs, warns, pols, sgInfo, flowState };
+    return { errs, warns, warns1, bad, pols, sgInfo, flowState };
   }
 
   /* ================= Génération YAML ================= */
   const q = (s) => (s === '' || /[:#\[\]{},&*!|>'"%@`\s]|^[-?\d.]|^(true|false|yes|no|on|off|null|~|y|n)$/i.test(s)) ? JSON.stringify(s) : s;
+  const oneLine = (s) => s.replace(/[\r\n]+/g, ' ');
   function header(L, name, comment) {
     L.push('---');
-    if (comment) comment.forEach(c => L.push('# ' + c));
+    if (comment) L.push('# ' + comment);
     L.push('apiVersion: k8s.cni.cncf.io/v1beta1');
     L.push('kind: MultiNetworkPolicy');
     L.push('metadata:');
@@ -381,38 +519,57 @@
     L.push('    k8s.v1.cni.cncf.io/policy-for: ' + JSON.stringify(S.meta.namespace + '/' + S.meta.nadName));
     L.push('spec:');
   }
-  function podSelector(L, groups) {
+  function podSelector(L, sd) {
     L.push('  podSelector:');
+    if (sd.any) {
+      L.push('    matchLabels:');
+      L.push('      ' + NET_LABEL + ': ' + JSON.stringify(S.meta.ng));
+      return;
+    }
     L.push('    matchExpressions:');
     L.push('      - key: ' + SG_LABEL);
     L.push('        operator: In');
     L.push('        values:');
-    groups.forEach(g => L.push('          - ' + fullName(g)));
+    sd.groups.forEach(g => L.push('          - ' + fullName(g)));
   }
-  const oneLine = (s) => s.replace(/[\r\n]+/g, ' ');
+  function rule(L, kw, peers, ports) {
+    L.push('    - ' + kw + ':');
+    peers.forEach(pr => {
+      L.push('        - ipBlock:');
+      L.push('            cidr: ' + pr.cidr);
+      if (pr.except) { L.push('            except:'); pr.except.forEach(e => L.push('              - ' + e)); }
+    });
+    if (ports.length) {
+      L.push('      ports:');
+      ports.forEach(pt => {
+        if (pt.app) L.push('        # ' + pt.app);
+        L.push('        - protocol: ' + pt.protocol);
+        L.push('          port: ' + (/^\d+$/.test(pt.port) ? pt.port : q(pt.port)));
+        if (pt.endPort) L.push('          endPort: ' + pt.endPort);
+      });
+    }
+  }
+  const targetText = (sd) => sd.any ? NET_LABEL + '=' + S.meta.ng : SG_LABEL + ' in (' + sd.groups.map(fullName).join(', ') + ')';
 
   function buildYaml(A) {
-    const L = [], objs = [];
-    const push = (name, kind, target, rules, lines) => objs.push({ name, kind, target, rules, text: lines.join('\n') + '\n' });
+    const objs = [];
     for (const p of A.pols) {
-      const l = [], kw = p.dir === 'ingress' ? 'from' : 'to';
-      header(l, p.name, ['Flux ' + p.idx + ' : ' + p.srcs.map(fullName).join(', ') + ' → ' + p.dsts.map(fullName).join(', ') + (p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '')]);
-      podSelector(l, p.targets);
+      const l = [];
+      const desc = p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '';
+      header(l, p.name, p.ns ? 'Flux ' + p.idx + ' Nord/Sud : ' + sideLabel(p.src) + ' ↔ extérieur + gateway' + desc
+        : 'Flux ' + p.idx + ' : ' + sideLabel(p.src) + ' → ' + sideLabel(p.dst) + desc);
+      podSelector(l, p.target);
       l.push('  policyTypes:');
-      l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
-      l.push('  ' + p.dir + ':');
-      l.push('    - ' + kw + ':');
-      p.peers.forEach(c => { l.push('        - ipBlock:'); l.push('            cidr: ' + c); });
-      if (p.ports.length) {
-        l.push('      ports:');
-        p.ports.forEach(pt => {
-          if (pt.app) l.push('        # ' + pt.app);
-          l.push('        - protocol: ' + pt.protocol);
-          l.push('          port: ' + (/^\d+$/.test(pt.port) ? pt.port : q(pt.port)));
-          if (pt.endPort) l.push('          endPort: ' + pt.endPort);
-        });
+      if (p.dir === 'both') {
+        l.push('    - Ingress'); l.push('    - Egress');
+        l.push('  egress:'); rule(l, 'to', p.peers, p.ports);
+        l.push('  ingress:'); rule(l, 'from', p.peers, p.ports);
+      } else {
+        l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
+        l.push('  ' + p.dir + ':');
+        rule(l, p.dir === 'ingress' ? 'from' : 'to', p.peers, p.ports);
       }
-      push(p.name, p.dir, SG_LABEL + ' in (' + p.targets.map(fullName).join(', ') + ')', p.idx, l);
+      objs.push({ name: p.name, kind: p.dir, target: targetText(p.target), idx: p.idx, text: l.join('\n') + '\n' });
     }
     return objs;
   }
@@ -427,11 +584,79 @@
     }).join('\n');
   }
 
-  /* ================= Rendu ================= */
-  const META = ['namespace', 'nadName', 'ng'];
-  function renderMeta() {
-    META.forEach(k => { $('m_' + k).value = S.meta[k]; });
+  /* ================= Liste déroulante avec recherche ================= */
+  // multi : sélection multiple avec puces ; sinon simple action « choisir un élément ».
+  function picker({ multi, placeholder, items, isSel, onPick, onRemove }) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pk';
+    wrap.innerHTML = '<div class="pk-box"><input type="text" class="pk-in" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false"></div>' +
+      '<div class="pk-pop" hidden><ul class="pk-list" role="listbox"></ul></div>';
+    const box = wrap.querySelector('.pk-box'), input = wrap.querySelector('input'), pop = wrap.querySelector('.pk-pop'), ul = wrap.querySelector('ul');
+    input.placeholder = placeholder;
+    let shown = [], active = 0;
+    function chips() {
+      if (!multi) return;
+      box.querySelectorAll('.chip').forEach(c => c.remove());
+      const sel = items().filter(it => isSel(it.value));
+      sel.forEach(it => {
+        const c = document.createElement('span');
+        c.className = 'chip' + (it.value === ANY ? ' any' : '');
+        c.innerHTML = '<span></span><button type="button" aria-label="Retirer">×</button>';
+        c.firstChild.textContent = it.label;
+        c.lastChild.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); onPick(it.value); chips(); list(); });
+        box.insertBefore(c, input);
+      });
+      input.placeholder = sel.length ? '' : placeholder;
+    }
+    function list() {
+      const qv = input.value.trim().toLowerCase();
+      shown = items().filter(it => !qv || (it.label + ' ' + (it.sub || '') + ' ' + it.value).toLowerCase().includes(qv));
+      if (active >= shown.length) active = Math.max(0, shown.length - 1);
+      ul.innerHTML = shown.length ? '' : '<li class="none">Aucun résultat</li>';
+      shown.forEach((it, k) => {
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        if (k === active) li.className = 'active';
+        li.innerHTML = (multi ? '<span class="ck">' + (isSel(it.value) ? '✓' : '') + '</span>' : '') +
+          '<span class="lb"><b></b><small></small></span>' + (it.custom ? '<span class="badge">perso</span><button type="button" title="Oublier ce service">✕</button>' : '');
+        li.querySelector('b').textContent = it.label;
+        li.querySelector('small').textContent = it.sub || '';
+        li.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          if (e.target.closest('button')) { onRemove(it.value); list(); return; }
+          pick(it);
+        });
+        ul.appendChild(li);
+      });
+    }
+    const open = () => { list(); pop.hidden = false; input.setAttribute('aria-expanded', 'true'); };
+    const close = () => { pop.hidden = true; input.setAttribute('aria-expanded', 'false'); };
+    function pick(it) {
+      onPick(it.value);
+      if (multi) { input.value = ''; chips(); list(); }
+      else { input.value = ''; close(); }
+    }
+    box.addEventListener('mousedown', (e) => { if (e.target !== input && !e.target.closest('.chip')) { e.preventDefault(); input.focus(); open(); } });
+    input.addEventListener('focus', open);
+    input.addEventListener('click', () => { if (pop.hidden) open(); });
+    input.addEventListener('blur', close);
+    input.addEventListener('input', () => { active = 0; open(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (pop.hidden) open(); else { active = Math.min(active + 1, shown.length - 1); list(); } }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); list(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (!pop.hidden && shown[active]) pick(shown[active]); }
+      else if (e.key === 'Escape') { close(); }
+      else if (e.key === 'Backspace' && multi && !input.value) {
+        const sel = items().filter(it => isSel(it.value));
+        if (sel.length) { onPick(sel[sel.length - 1].value); chips(); list(); }
+      }
+    });
+    chips();
+    return { el: wrap, box };
   }
+
+  /* ================= Rendu ================= */
+  function renderMeta() { META.forEach(k => { $('m_' + k).value = S.meta[k]; }); }
 
   function renderSgs() {
     const host = $('sgList');
@@ -448,17 +673,13 @@
         '<label class="field" style="margin-top:10px"><span>IP / réseaux</span>' +
           '<textarea data-f="ips" rows="3" spellcheck="false" placeholder="10.235.10.12&#10;10.235.10.13&#10;10.235.20.0/24"></textarea>' +
           '<div class="hint">Une entrée par ligne (ou séparées par virgule). IP seule = /32. Ce sont les IP utilisées quand le groupe est l\'autre extrémité d\'un flux.</div></label>' +
-        '<div class="field" style="margin-top:10px"><span style="display:block;font-weight:600;margin-bottom:4px;font-size:13px">podSelector</span>' +
+        '<div class="field" style="margin-top:10px"><span class="flabel">podSelector</span>' +
           '<code class="selector" data-sel></code>' +
           '<div class="hint">Les pods (VM) de ce groupe doivent porter ce label.</div></div>';
       el.querySelectorAll('[data-f]').forEach(inp => {
         const f = inp.dataset.f;
-        if (inp.type === 'checkbox') inp.checked = !!g[f]; else inp.value = g[f] || '';
-        inp.addEventListener(inp.type === 'checkbox' ? 'change' : 'input', () => {
-          g[f] = inp.type === 'checkbox' ? inp.checked : inp.value;
-          if (f === 'name') renderFlows();
-          refresh();
-        });
+        inp.value = g[f] || '';
+        inp.addEventListener('input', () => { g[f] = inp.value; if (f === 'name') renderFlows(); refresh(); });
       });
       el.querySelector('[data-del]').onclick = () => {
         if (used && !confirm('Ce groupe est utilisé dans ' + used + ' flux. Supprimer quand même ? Il sera retiré de ces flux.')) return;
@@ -470,49 +691,83 @@
     });
   }
 
-  function sgPicks(side, sel) {
-    if (!S.sgs.length) return '<span class="hint">Aucun security group.</span>';
-    return S.sgs.map(g => '<label class="pick"><input type="checkbox" data-side="' + side + '" value="' + g.id + '"' +
-      (sel.includes(g.id) ? ' checked' : '') + '><span>' + esc(sgLabel(g)) + '</span></label>').join('');
+  function sgItems() {
+    return [{ value: ANY, label: 'any', sub: 'tout le network' + (S.meta.network ? ' ' + S.meta.network : '') }]
+      .concat(S.sgs.map(g => ({ value: g.id, label: sgLabel(g), sub: splitList(g.ips).slice(0, 3).join(', ') + (splitList(g.ips).length > 3 ? '…' : '') })));
   }
+  // « any » est exclusif : il remplace les groupes, et un groupe remplace « any »
+  function toggleSide(f, key, v) {
+    const cur = f[key];
+    if (cur.includes(v)) f[key] = cur.filter(x => x !== v);
+    else if (v === ANY) f[key] = [ANY];
+    else { const keep = cur.filter(x => x !== ANY); f[key] = S.sgs.map(g => g.id).filter(id => id === v || keep.includes(id)); }
+    renderSgs(); refresh();
+  }
+  function addService(f, name) {
+    const svc = allServices().find(s => s.name === name); if (!svc) return;
+    f.ports = f.ports.filter(p => p.port || p.endPort || p.app);
+    svc.ports.forEach(([protocol, port, endPort]) => {
+      if (!f.ports.some(p => p.protocol === protocol && p.port === port && p.endPort === endPort && p.app === svc.name))
+        f.ports.push({ protocol, port, endPort, app: svc.name });
+    });
+    renderFlows(); refresh();
+  }
+
   function renderFlows() {
     const host = $('flowList');
     if (!S.flows.length) { host.innerHTML = '<p class="empty">' + (S.sgs.length ? 'Aucun flux. Ajoutez-en un.' : 'Créez d\'abord des security groups (étape 2).') + '</p>'; return; }
     host.innerHTML = '';
     S.flows.forEach((f, i) => {
+      const ns = f.type === 'ns';
       const el = document.createElement('div');
       el.className = 'item';
       el.dataset.flow = f.id;
       el.innerHTML =
-        '<div class="item-head"><strong>Flux ' + (i + 1) + '</strong><span>' +
+        '<div class="item-head"><span class="flow-type"><strong>Flux ' + (i + 1) + '</strong>' +
+          '<select data-type aria-label="Type de flux"><option value="ew">Est/Ouest</option><option value="ns">Nord/Sud</option></select></span><span>' +
           '<button type="button" class="small" data-dup title="Dupliquer">Dupliquer</button> ' +
           '<button type="button" class="danger small" data-del>Supprimer</button></span></div>' +
-        '<div class="flow-line">' +
-          '<div class="field"><span class="flabel">Source(s)</span><div class="picks" data-picks="src">' + sgPicks('src', f.src) + '</div></div>' +
-          '<span class="arrow" aria-hidden="true">→</span>' +
-          '<div class="field"><span class="flabel">Destination(s)</span><div class="picks" data-picks="dst">' + sgPicks('dst', f.dst) + '</div></div>' +
-        '</div>' +
+        (ns
+          ? '<div class="field"><span class="flabel">Security groups concernés</span><div data-pk="src"></div>' +
+            '<div class="fixed-peers">Autorise ces pods à joindre et à être joints par l\'extérieur (<code>0.0.0.0/0</code> sauf <code data-net></code>) et la gateway <code data-gw></code>.</div></div>'
+          : '<div class="flow-line">' +
+              '<div class="field"><span class="flabel">Source(s)</span><div data-pk="src"></div></div>' +
+              '<span class="arrow" aria-hidden="true">→</span>' +
+              '<div class="field"><span class="flabel">Destination(s)</span><div data-pk="dst"></div></div>' +
+            '</div>') +
         '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
-        '<div class="ports-title">Ports et applications</div><div data-ports></div>' +
-        '<button type="button" class="small" data-addport>+ Port</button>' +
+        '<div class="ports-title">Services</div>' +
+        '<div class="svc-bar"><div data-svc></div><button type="button" class="small" data-addport>+ Port manuel</button></div>' +
+        '<div data-ports></div>' +
         '<div class="effect" data-effect></div>';
-      el.querySelectorAll('[data-f]').forEach(inp => {
-        const k = inp.dataset.f;
-        inp.value = f[k] || '';
-        inp.addEventListener('input', () => { f[k] = inp.value; refresh(); });
+      const sel = el.querySelector('[data-type]');
+      sel.value = ns ? 'ns' : 'ew';
+      sel.onchange = () => { f.type = sel.value; if (f.type === 'ns') f.dst = []; renderFlows(); refresh(); };
+      ['src', 'dst'].forEach(key => {
+        const slot = el.querySelector('[data-pk=' + key + ']'); if (!slot) return;
+        const pk = picker({
+          multi: true, placeholder: 'Rechercher un security group ou any…', items: sgItems,
+          isSel: (v) => f[key].includes(v), onPick: (v) => toggleSide(f, key, v),
+        });
+        pk.box.dataset.box = key;
+        slot.appendChild(pk.el);
       });
-      el.querySelectorAll('[data-side]').forEach(cb => cb.addEventListener('change', () => {
-        const side = cb.dataset.side;
-        // garde l'ordre des security groups
-        f[side] = S.sgs.map(g => g.id).filter(id => id === cb.value ? cb.checked : f[side].includes(id));
-        renderSgs(); refresh();
-      }));
+      el.querySelector('[data-svc]').appendChild(picker({
+        multi: false, placeholder: 'Ajouter un service : rechercher HTTPS, 22, postgres…',
+        items: () => allServices().map(s => ({ value: s.name, label: s.label, sub: s.name + ' · ' + fmtPorts(s.ports), custom: s.custom })),
+        isSel: () => false, onPick: (v) => addService(f, v),
+        onRemove: (v) => { custom = custom.filter(s => s.name !== v); saveServices(); },
+      }).el);
+      const d = el.querySelector('[data-f=desc]');
+      d.value = f.desc || '';
+      d.addEventListener('input', () => { f.desc = d.value; refresh(); });
+
       const ph = el.querySelector('[data-ports]');
-      if (!f.ports.length) ph.innerHTML = '<p class="empty" style="margin:0 0 6px">Aucun port : tous les ports et protocoles.</p>';
+      if (!f.ports.length) ph.innerHTML = '<p class="empty" style="margin:0 0 6px">Aucun service : tous les ports et protocoles.</p>';
       f.ports.forEach((p, qi) => {
         const row = document.createElement('div');
         row.className = 'row port';
-        row.innerHTML = '<select aria-label="Protocole"><option>TCP</option><option>UDP</option><option>SCTP</option></select>' +
+        row.innerHTML = '<select aria-label="Protocole">' + PROTOS.map(x => '<option>' + x + '</option>').join('') + '</select>' +
           '<input type="text" placeholder="port (ex. 443)" spellcheck="false" aria-label="Port">' +
           '<input type="number" min="1" max="65535" placeholder="fin de plage (option.)" aria-label="Fin de plage">' +
           '<input type="text" placeholder="application (ex. https)" spellcheck="false" aria-label="Nom de l\'application">' +
@@ -520,17 +775,22 @@
         const [pr, po, en, ap, del] = row.children;
         pr.value = p.protocol; po.value = p.port; en.value = p.endPort; ap.value = p.app || '';
         po.dataset.port = qi; en.dataset.port = qi; ap.dataset.port = qi;
-        ap.oninput = () => { p.app = ap.value.trim(); refresh(); };
-        pr.onchange = () => { p.protocol = pr.value; refresh(); };
+        pr.onchange = () => { p.protocol = pr.value; learnService(p); refresh(); };
         po.oninput = () => { p.port = po.value.trim(); refresh(); };
         en.oninput = () => { p.endPort = en.value.trim(); refresh(); };
+        ap.oninput = () => { p.app = ap.value.trim(); refresh(); };
+        [po, en, ap].forEach(x => x.addEventListener('change', () => learnService(p)));
         del.onclick = () => { f.ports.splice(qi, 1); renderFlows(); refresh(); };
         ph.appendChild(row);
       });
-      el.querySelector('[data-addport]').onclick = () => { f.ports.push({ protocol: 'TCP', port: '', endPort: '', app: '' }); renderFlows(); refresh(); };
+      el.querySelector('[data-addport]').onclick = () => {
+        f.ports.push({ protocol: 'TCP', port: '', endPort: '', app: '' }); renderFlows(); refresh();
+        const rows = $('flowList').querySelectorAll('[data-flow="' + f.id + '"] .row.port');
+        rows.length && rows[rows.length - 1].children[1].focus();
+      };
       el.querySelector('[data-del]').onclick = () => { S.flows.splice(i, 1); renderFlows(); renderSgs(); refresh(); };
       el.querySelector('[data-dup]').onclick = () => {
-        S.flows.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(f)), id: uid() }); renderFlows(); refresh();
+        S.flows.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(f)), id: uid() }); renderFlows(); renderSgs(); refresh();
       };
       host.appendChild(el);
     });
@@ -539,48 +799,53 @@
   let objs = [], fullYaml = '';
   function refresh() {
     const A = analyse();
+    const m = S.meta;
     // Étape 1
     $('annotPreview').innerHTML = 'Annotation : <code></code>';
-    $('annotPreview').firstElementChild.textContent = 'k8s.v1.cni.cncf.io/policy-for: ' + S.meta.namespace + '/' + S.meta.nadName;
-    const m = S.meta;
+    $('annotPreview').firstElementChild.textContent = 'k8s.v1.cni.cncf.io/policy-for: ' + m.namespace + '/' + m.nadName;
     $('m_namespace').classList.toggle('invalid', !!m.namespace && !DNS_LABEL.test(m.namespace));
     $('m_ng').classList.toggle('invalid', !!m.ng && !(m.ng.length <= 40 && DNS_LABEL.test(m.ng)));
     $('m_nadName').classList.toggle('invalid', !!m.nadName && !DNS_SUB.test(m.nadName));
+    $('m_network').classList.toggle('invalid', A.bad.network);
+    $('m_gateway').classList.toggle('invalid', A.bad.gateway);
     $('nsRef').textContent = m.namespace || '…';
-    // Étape 2 : marquage
+    // Étape 2
     document.querySelectorAll('#sgList [data-sg]').forEach(el => {
       const info = A.sgInfo[el.dataset.sg]; if (!info) return;
-      el.querySelector('[data-pfx]').textContent = S.meta.ng ? S.meta.ng + '-' : '';
+      const g = sgById(el.dataset.sg);
+      el.querySelector('[data-pfx]').textContent = m.ng ? m.ng + '-' : '';
       el.querySelector('[data-f=name]').classList.toggle('invalid', info.badName);
       el.querySelector('[data-f=ips]').classList.toggle('invalid', info.badIps);
-      const g = sgById(el.dataset.sg); el.querySelector('[data-sel]').textContent = SG_LABEL + ': ' + (g && g.name ? fullName(g) : '…');
+      el.querySelector('[data-sel]').textContent = SG_LABEL + ': ' + (g && g.name ? fullName(g) : '…');
     });
-    // Étape 3 : marquage + effet
+    // Étape 3
     document.querySelectorAll('#flowList [data-flow]').forEach(el => {
       const fs = A.flowState[el.dataset.flow]; if (!fs) return;
-      el.querySelector('[data-picks=src]').classList.toggle('invalid', fs.src);
-      el.querySelector('[data-picks=dst]').classList.toggle('invalid', fs.dst);
+      ['src', 'dst'].forEach(k => { const b = el.querySelector('[data-box=' + k + ']'); if (b) b.classList.toggle('invalid', fs[k]); });
       el.querySelectorAll('[data-port]').forEach(inp => inp.classList.toggle('invalid', fs.ports.has(+inp.dataset.port)));
+      const n = el.querySelector('[data-net]'); if (n) n.textContent = m.network || '<network>';
+      const gwEl = el.querySelector('[data-gw]'); if (gwEl) gwEl.textContent = m.gateway ? m.gateway.replace(/\/32$/, '') + '/32' : '<gateway>';
       el.querySelector('[data-effect]').innerHTML = fs.effects.length
-        ? 'Génère : ' + fs.effects.map(p => '<span class="tag ' + (p.dir === 'ingress' ? 'in' : 'out') + '">' + p.dir + '</span> <code>' + esc(p.name) + '</code>').join(' ')
+        ? 'Génère : ' + fs.effects.map(p => '<span class="tag ' + (p.dir === 'both' ? 'ns' : p.dir === 'ingress' ? 'in' : 'out') + '">' +
+          (p.dir === 'both' ? 'ingress + egress' : p.dir) + '</span> <code>' + esc(p.name) + '</code>').join(' ')
         : '';
     });
-    const showErr = (id, list) => { $(id).innerHTML = list.map(e => '<li>' + esc(e) + '</li>').join(''); };
-    showErr('err1', A.errs[1]); showErr('err2', A.errs[2]); showErr('err3', A.errs[3]);
+    const showList = (id, list) => { $(id).innerHTML = list.map(e => '<li>' + esc(e) + '</li>').join(''); };
+    showList('err1', A.errs[1]); showList('warn1', A.warns1); showList('err2', A.errs[2]); showList('err3', A.errs[3]);
     // Étape 4
     const allErr = [...A.errs[1], ...A.errs[2], ...A.errs[3]];
     if (!A.pols.length && !allErr.length) allErr.push('Aucune règle à générer : ajoutez au moins un flux.');
-    showErr('err4', allErr.length ? ['Corrigez ces points avant d\'appliquer le YAML :', ...allErr] : []);
-    showErr('warn4', A.warns);
+    showList('err4', allErr.length ? ['Corrigez ces points avant d\'appliquer le YAML :', ...allErr] : []);
+    showList('warn4', [...A.warns1, ...A.warns]);
     objs = buildYaml(A);
     fullYaml = objs.map(o => o.text).join('');
     $('yaml').innerHTML = fullYaml ? highlight(fullYaml) : '<span class="c"># Rien à générer pour le moment</span>';
     $('polTable').innerHTML = objs.length
       ? '<thead><tr><th>Objet</th><th>Sens</th><th>Pods ciblés</th><th>Flux</th><th></th></tr></thead><tbody>' +
-        objs.map((o, i) => '<tr><td><code>' + esc(o.name) + '</code></td><td><span class="tag ' + (o.kind === 'ingress' ? 'in' : 'out') + '">' + o.kind + '</span></td><td>' +
-          esc(o.target) + '</td><td>' + o.rules + '</td><td><button type="button" class="small" data-copyone="' + i + '">Copier</button></td></tr>').join('') + '</tbody>'
+        objs.map((o, i) => '<tr><td><code>' + esc(o.name) + '</code></td><td><span class="tag ' + (o.kind === 'both' ? 'ns' : o.kind === 'ingress' ? 'in' : 'out') + '">' +
+          (o.kind === 'both' ? 'ingress + egress' : o.kind) + '</span></td><td>' + esc(o.target) + '</td><td>' + o.idx +
+          '</td><td><button type="button" class="small" data-copyone="' + i + '">Copier</button></td></tr>').join('') + '</tbody>'
       : '';
-    // Compteurs / étapes
     $('sgCount').textContent = S.sgs.length + ' groupe' + (S.sgs.length > 1 ? 's' : '');
     $('flowCount').textContent = S.flows.length + ' flux';
     $('polCount').textContent = objs.length + ' objet' + (objs.length > 1 ? 's' : '');
@@ -605,10 +870,11 @@
     if (!d || typeof d !== 'object') return o;
     const str = (v) => typeof v === 'string' ? v : '';
     const ids = (v) => Array.isArray(v) ? v.filter(x => typeof x === 'string') : (typeof v === 'string' && v ? [v] : []);
-    if (d.meta) { META.forEach(k => o.meta[k] = str(d.meta[k])); }
+    if (d.meta) META.forEach(k => o.meta[k] = str(d.meta[k]));
     if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), ips: str(g.ips) }));
-    if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), src: ids(f.src), dst: ids(f.dst), desc: str(f.desc),
-      ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: ['TCP', 'UDP', 'SCTP'].includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
+    if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), type: f.type === 'ns' ? 'ns' : 'ew',
+      src: ids(f.src), dst: f.type === 'ns' ? [] : ids(f.dst), desc: str(f.desc),
+      ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: PROTOS.includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
     o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
     return o;
   }
@@ -623,10 +889,9 @@
     renderSgs(); renderFlows(); refresh();
     const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
   };
-  $('addFlow').onclick = () => {
-    S.flows.push({ id: uid(), src: [], dst: [], desc: '', ports: [{ protocol: 'TCP', port: '', endPort: '', app: '' }] });
-    renderFlows(); refresh();
-  };
+  const newFlow = (type) => { S.flows.push({ id: uid(), type, src: [], dst: [], desc: '', ports: [] }); renderFlows(); refresh(); };
+  $('addFlow').onclick = () => newFlow('ew');
+  $('addNs').onclick = () => newFlow('ns');
   function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); flash('Copié ✓'); }
@@ -644,15 +909,18 @@
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
   $('dlBtn').onclick = () => download((S.meta.ng || S.meta.nadName || 'multinetworkpolicy') + '.yaml', fullYaml, 'application/x-yaml');
-  $('exportBtn').onclick = () => { const { step, ...rest } = S; download((S.meta.ng || S.meta.nadName || 'projet') + '.mnp.json', JSON.stringify(rest, null, 2), 'application/json'); };
+  $('exportBtn').onclick = () => {
+    const { step, ...rest } = S;
+    download((S.meta.ng || S.meta.nadName || 'projet') + '.mnp.json', JSON.stringify({ ...rest, customServices: custom }, null, 2), 'application/json');
+  };
   $('importBtn').onclick = () => $('importFile').click();
   $('importFile').onchange = async (e) => {
     const file = e.target.files[0]; if (!file) return;
-    try { loadAll({ ...JSON.parse(await file.text()), step: 1 }); }
+    try { const d = JSON.parse(await file.text()); mergeServices(d.customServices); loadAll({ ...d, step: 1 }); }
     catch (err) { alert('Fichier invalide : ' + err.message); }
     e.target.value = '';
   };
-  $('resetBtn').onclick = () => { if (confirm('Effacer toute la saisie ?')) loadAll(blank()); };
+  $('resetBtn').onclick = () => { if (confirm('Effacer toute la saisie ? (les services personnalisés sont conservés)')) loadAll(blank()); };
 
   // Thème
   const applyTheme = (t) => { if (t) document.documentElement.setAttribute('data-theme', t); };
