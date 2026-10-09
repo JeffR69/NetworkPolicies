@@ -83,8 +83,8 @@
   .flow-line .arrow { font-size: 20px; padding-bottom: 5px; color: var(--muted); }
   @media (max-width: 560px) { .flow-line { grid-template-columns: 1fr; } .flow-line .arrow { display: none; } }
   .ports-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
-  .row.port { display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; margin-bottom: 6px; align-items: center; }
-  @media (max-width: 560px) { .row.port { grid-template-columns: 1fr 1fr auto; } .row.port > :first-child { grid-column: 1 / -1; } }
+  .row.port { display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; margin-bottom: 6px; align-items: center; }
+  @media (max-width: 560px) { .row.port { grid-template-columns: 1fr 1fr auto; } .row.port > :first-child { grid-column: 1 / 3; } .row.port > :nth-child(4) { grid-column: 1 / 3; } .row.port > :last-child { grid-column: 3; grid-row: 1; } }
   .effect { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
   ul.msgs { margin: 0 0 12px; padding: 10px 10px 10px 28px; border-radius: 6px; font-size: 13px; }
@@ -148,13 +148,10 @@
     </label>
     <label class="field"><span>Network Group</span>
       <input type="text" id="m_ng" spellcheck="false" placeholder="ex. promptly">
-      <div class="hint">Préfixe des security groups : <code>&lt;network-group&gt;-&lt;groupe&gt;</code>. Les objets générés s'appellent <code>&lt;network-group&gt;-&lt;groupe&gt;-ingress|egress</code>.</div>
+      <div class="hint">Préfixe des security groups : <code>&lt;network-group&gt;-&lt;groupe&gt;</code>. Il commence aussi le nom des policies générées.</div>
     </label>
   </div>
   <p class="hint" id="annotPreview"></p>
-  <label class="chk" style="margin-top:12px"><input type="checkbox" id="m_defaultDeny">
-    <span>Générer aussi les politiques « deny all » (ingress et egress) pour tous les pods du namespace sur cette NAD
-    <span class="hint" style="display:block;font-weight:400">Sans elles, seuls les pods des groupes utilisés dans un flux sont filtrés ; les autres pods restent ouverts.</span></span></label>
   <ul class="msgs err" id="err1" style="margin-top:12px"></ul>
   <div class="navbtns"><span></span><button type="button" class="primary" data-go="2">Suivant : security groups →</button></div>
 </section>
@@ -194,7 +191,7 @@
 <!-- ÉTAPE 4 -->
 <section class="card" data-panel="4" hidden>
   <h2>4. YAML généré</h2>
-  <p class="lead">Un objet par security group et par sens : jamais d'ingress et d'egress dans la même MultiNetworkPolicy.</p>
+  <p class="lead">Deux objets par flux : un ingress sur le groupe destination, un egress sur le groupe source. Jamais d'ingress et d'egress dans la même MultiNetworkPolicy.</p>
   <ul class="msgs err" id="err4"></ul>
   <ul class="msgs warn" id="warn4"></ul>
   <div class="table-wrap"><table id="polTable"></table></div>
@@ -216,7 +213,7 @@
   const uid = () => Math.random().toString(36).slice(2, 9);
 
   const blank = () => ({
-    meta: { namespace: '', nadName: '', ng: '', defaultDeny: false },
+    meta: { namespace: '', nadName: '', ng: '' },
     sgs: [], flows: [], step: 1,
   });
   let S = blank();
@@ -262,6 +259,16 @@
   const SG_LABEL = 'neos/vm.dfw-sg';
   const sgById = (id) => S.sgs.find(g => g.id === id);
   const fullName = (g) => (S.meta.ng ? S.meta.ng + '-' : '') + g.name;
+  // Séparateur des noms d'application : « _ » est refusé par l'API Kubernetes (RFC 1123), « . » est accepté.
+  const NA_SEP = '.';
+  function polName(p) {
+    const ng = S.meta.ng ? S.meta.ng + '-' : '';
+    const apps = [...new Set(p.apps)];
+    const suffix = apps.length ? NA_SEP + apps.join(NA_SEP) : '';
+    return p.dir === 'ingress'
+      ? ng + p.dst.name + '-ingress-from-' + p.src.name + suffix
+      : ng + p.src.name + '-egress-to-' + p.dst.name + suffix;
+  }
   const sgLabel = (g) => g ? (g.name ? fullName(g) : '(sans nom)') : '(groupe supprimé)';
 
   /* ================= Modèle -> politiques ================= */
@@ -291,13 +298,8 @@
       sgInfo[g.id] = info;
     });
 
-    // Politiques : clé = sens + security group ciblé
-    const pols = new Map();
-    const getPol = (dir, g) => {
-      const key = dir + '|' + g.id;
-      if (!pols.has(key)) pols.set(key, { dir, sg: g, rules: [] });
-      return pols.get(key);
-    };
+    // Une policy par flux et par sens
+    const pols = [];
     const flowState = {};
     S.flows.forEach((f, i) => {
       const where = 'Flux ' + (i + 1);
@@ -307,12 +309,13 @@
       if (!src) { errs[3].push(where + ' : choisissez une source.'); fe.src = true; }
       if (!dst) { errs[3].push(where + ' : choisissez une destination.'); fe.dst = true; }
       // Ports
-      const ports = [];
+      const ports = [], apps = [];
       f.ports.forEach((p, qi) => {
         const pw = where + ', port ' + (qi + 1);
         const numeric = /^\d+$/.test(p.port);
-        if (p.port === '' && p.endPort === '') return;
         let bad = false;
+        if (p.app && !(p.app.length <= 63 && DNS_LABEL.test(p.app))) { errs[3].push(pw + ' : nom d\'application « ' + p.app + ' » invalide (minuscules, chiffres, « - »).'); bad = true; }
+        if (p.port === '' && p.endPort === '') { if (bad) fe.ports.add(qi); else if (p.app) apps.push(p.app); return; }
         if (p.port === '') { errs[3].push(pw + ' : port de début manquant.'); bad = true; }
         else if (numeric && (+p.port < 1 || +p.port > 65535)) { errs[3].push(pw + ' : port hors plage 1-65535.'); bad = true; }
         else if (!numeric && !(p.port.length <= 15 && DNS_LABEL.test(p.port) && /[a-z]/.test(p.port))) { errs[3].push(pw + ' : port nommé « ' + p.port + ' » invalide.'); bad = true; }
@@ -320,19 +323,20 @@
           if (!numeric) { errs[3].push(pw + ' : une plage exige un port numérique.'); bad = true; }
           else if (!/^\d+$/.test(p.endPort) || +p.endPort > 65535 || +p.endPort < +p.port) { errs[3].push(pw + ' : fin de plage doit être ≥ début et ≤ 65535.'); bad = true; }
         }
-        if (bad) fe.ports.add(qi); else ports.push({ protocol: p.protocol, port: p.port, endPort: p.endPort && p.endPort !== p.port ? p.endPort : '' });
+        if (bad) fe.ports.add(qi);
+        else { ports.push({ protocol: p.protocol, port: p.port, endPort: p.endPort && p.endPort !== p.port ? p.endPort : '', app: p.app }); if (p.app) apps.push(p.app); }
       });
       if (!src || !dst) return;
       if (!ports.length) warns.push(where + ' (' + sgLabel(src) + ' → ' + sgLabel(dst) + ') : aucun port, tous les ports et protocoles sont autorisés.');
       {
         const peers = sgInfo[src.id].cidrs;
         if (!peers.length) { errs[3].push(where + ' : la source « ' + sgLabel(src) + ' » n\'a aucune IP, impossible d\'écrire la règle ingress.'); fe.src = true; }
-        else { getPol('ingress', dst).rules.push({ flow: f, idx: i + 1, src, dst, peers, ports }); fe.effects.push(['in', dst]); }
+        else { const pol = { dir: 'ingress', sg: dst, src, dst, flow: f, idx: i + 1, peers, ports, apps }; pol.name = polName(pol); pols.push(pol); fe.effects.push(pol); }
       }
       {
         const peers = sgInfo[dst.id].cidrs;
         if (!peers.length) { errs[3].push(where + ' : la destination « ' + sgLabel(dst) + ' » n\'a aucune IP, impossible d\'écrire la règle egress.'); fe.dst = true; }
-        else { getPol('egress', src).rules.push({ flow: f, idx: i + 1, src, dst, peers, ports }); fe.effects.push(['out', src]); }
+        else { const pol = { dir: 'egress', sg: src, src, dst, flow: f, idx: i + 1, peers, ports, apps }; pol.name = polName(pol); pols.push(pol); fe.effects.push(pol); }
       }
     });
 
@@ -341,8 +345,18 @@
         warns.push('Le groupe « ' + sgLabel(g) + ' » n\'est utilisé dans aucun flux.');
     });
 
-    const list = [...pols.values()].sort((x, y) => (x.sg.name || '').localeCompare(y.sg.name || '') || x.dir.localeCompare(y.dir));
-    return { errs, warns, pols: list, sgInfo, flowState };
+    // Noms : validité et unicité
+    const byName = new Map();
+    pols.forEach(p => {
+      if (!byName.has(p.name)) byName.set(p.name, []);
+      byName.get(p.name).push(p.idx);
+      if (p.name.length > 253 || !DNS_SUB.test(p.name)) errs[3].push('Flux ' + p.idx + ' : nom de policy « ' + p.name + ' » invalide (253 car. max, minuscules, chiffres, « - », « . »).');
+    });
+    byName.forEach((idx, name) => {
+      const u = [...new Set(idx)];
+      if (u.length > 1) errs[3].push('Flux ' + u.join(', ') + ' : même nom de policy « ' + name + ' ». Différenciez-les par les noms d\'application ou regroupez les ports dans un seul flux.');
+    });
+    return { errs, warns, pols, sgInfo, flowState };
   }
 
   /* ================= Génération YAML ================= */
@@ -366,44 +380,29 @@
     labels.forEach(([k, v]) => L.push('      ' + q(k) + ': ' + JSON.stringify(v)));
   }
   const oneLine = (s) => s.replace(/[\r\n]+/g, ' ');
-  function polName(p) { return fullName(p.sg) + '-' + p.dir; }
 
   function buildYaml(A) {
     const L = [], objs = [];
     const push = (name, kind, target, rules, lines) => objs.push({ name, kind, target, rules, text: lines.join('\n') + '\n' });
-    if (S.meta.defaultDeny) {
-      for (const dir of ['ingress', 'egress']) {
-        const l = [], n = (S.meta.ng ? S.meta.ng + '-' : '') + 'default-deny-' + dir;
-        header(l, n, ['Bloque tout le trafic ' + (dir === 'ingress' ? 'entrant' : 'sortant') + ' non autorisé explicitement']);
-        l.push('  podSelector: {}');
-        l.push('  policyTypes:');
-        l.push('    - ' + (dir === 'ingress' ? 'Ingress' : 'Egress'));
-        l.push('  ' + dir + ': []');
-        push(n, dir, 'tous les pods', 0, l);
-      }
-    }
     for (const p of A.pols) {
-      const l = [], n = polName(p), kw = p.dir === 'ingress' ? 'from' : 'to';
-      header(l, n, ['Security group : ' + fullName(p.sg) + ' — ' + (p.dir === 'ingress' ? 'flux entrants' : 'flux sortants')]);
+      const l = [], kw = p.dir === 'ingress' ? 'from' : 'to';
+      header(l, p.name, ['Flux ' + p.idx + ' : ' + fullName(p.src) + ' → ' + fullName(p.dst) + (p.flow.desc ? ' — ' + oneLine(p.flow.desc) : '')]);
       podSelector(l, A.sgInfo[p.sg.id].labels);
       l.push('  policyTypes:');
       l.push('    - ' + (p.dir === 'ingress' ? 'Ingress' : 'Egress'));
       l.push('  ' + p.dir + ':');
-      for (const r of p.rules) {
-        l.push('    # Flux ' + r.idx + ' : ' + fullName(r.src) + ' → ' + fullName(r.dst) + (r.flow.desc ? ' — ' + oneLine(r.flow.desc) : ''));
-        l.push('    - ' + kw + ':');
-        r.peers.forEach(c => { l.push('        - ipBlock:'); l.push('            cidr: ' + c); });
-        if (r.ports.length) {
-          l.push('      ports:');
-          r.ports.forEach(pt => {
-            l.push('        - protocol: ' + pt.protocol);
-            l.push('          port: ' + (/^\d+$/.test(pt.port) ? pt.port : q(pt.port)));
-            if (pt.endPort) l.push('          endPort: ' + pt.endPort);
-          });
-        }
+      l.push('    - ' + kw + ':');
+      p.peers.forEach(c => { l.push('        - ipBlock:'); l.push('            cidr: ' + c); });
+      if (p.ports.length) {
+        l.push('      ports:');
+        p.ports.forEach(pt => {
+          if (pt.app) l.push('        # ' + pt.app);
+          l.push('        - protocol: ' + pt.protocol);
+          l.push('          port: ' + (/^\d+$/.test(pt.port) ? pt.port : q(pt.port)));
+          if (pt.endPort) l.push('          endPort: ' + pt.endPort);
+        });
       }
-      const labels = A.sgInfo[p.sg.id].labels;
-      push(n, p.dir, labels.map(([k, v]) => k + '=' + v).join(', '), p.rules.length, l);
+      push(p.name, p.dir, A.sgInfo[p.sg.id].labels.map(([k, v]) => k + '=' + v).join(', '), p.idx, l);
     }
     return objs;
   }
@@ -422,7 +421,6 @@
   const META = ['namespace', 'nadName', 'ng'];
   function renderMeta() {
     META.forEach(k => { $('m_' + k).value = S.meta[k]; });
-    $('m_defaultDeny').checked = !!S.meta.defaultDeny;
   }
 
   function renderSgs() {
@@ -487,7 +485,7 @@
           '<label class="field"><span>Destination</span><select data-f="dst">' + sgOptions(f.dst) + '</select></label>' +
         '</div>' +
         '<label class="field" style="margin-top:10px"><span>Description</span><input type="text" data-f="desc" placeholder="optionnel, ex. API métier"></label>' +
-        '<div class="ports-title">Ports</div><div data-ports></div>' +
+        '<div class="ports-title">Ports et applications</div><div data-ports></div>' +
         '<button type="button" class="small" data-addport>+ Port</button>' +
         '<div class="effect" data-effect></div>';
       el.querySelectorAll('[data-f]').forEach(inp => {
@@ -503,17 +501,19 @@
         row.innerHTML = '<select aria-label="Protocole"><option>TCP</option><option>UDP</option><option>SCTP</option></select>' +
           '<input type="text" placeholder="port (ex. 443)" spellcheck="false" aria-label="Port">' +
           '<input type="number" min="1" max="65535" placeholder="fin de plage (option.)" aria-label="Fin de plage">' +
+          '<input type="text" placeholder="application (ex. https)" spellcheck="false" aria-label="Nom de l\'application">' +
           '<button type="button" class="danger" title="Supprimer le port">✕</button>';
-        const [pr, po, en, del] = row.children;
-        pr.value = p.protocol; po.value = p.port; en.value = p.endPort;
-        po.dataset.port = qi; en.dataset.port = qi;
+        const [pr, po, en, ap, del] = row.children;
+        pr.value = p.protocol; po.value = p.port; en.value = p.endPort; ap.value = p.app || '';
+        po.dataset.port = qi; en.dataset.port = qi; ap.dataset.port = qi;
+        ap.oninput = () => { p.app = ap.value.trim(); refresh(); };
         pr.onchange = () => { p.protocol = pr.value; refresh(); };
         po.oninput = () => { p.port = po.value.trim(); refresh(); };
         en.oninput = () => { p.endPort = en.value.trim(); refresh(); };
         del.onclick = () => { f.ports.splice(qi, 1); renderFlows(); refresh(); };
         ph.appendChild(row);
       });
-      el.querySelector('[data-addport]').onclick = () => { f.ports.push({ protocol: 'TCP', port: '', endPort: '' }); renderFlows(); refresh(); };
+      el.querySelector('[data-addport]').onclick = () => { f.ports.push({ protocol: 'TCP', port: '', endPort: '', app: '' }); renderFlows(); refresh(); };
       el.querySelector('[data-del]').onclick = () => { S.flows.splice(i, 1); renderFlows(); renderSgs(); refresh(); };
       el.querySelector('[data-dup]').onclick = () => {
         S.flows.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(f)), id: uid() }); renderFlows(); refresh();
@@ -548,7 +548,7 @@
       el.querySelector('[data-f=dst]').classList.toggle('invalid', fs.dst);
       el.querySelectorAll('[data-port]').forEach(inp => inp.classList.toggle('invalid', fs.ports.has(+inp.dataset.port)));
       el.querySelector('[data-effect]').innerHTML = fs.effects.length
-        ? 'Génère : ' + fs.effects.map(([d, g]) => '<span class="tag ' + d + '">' + (d === 'in' ? 'ingress' : 'egress') + '</span> sur <b>' + esc(fullName(g)) + '</b>').join(' + ')
+        ? 'Génère : ' + fs.effects.map(p => '<span class="tag ' + (p.dir === 'ingress' ? 'in' : 'out') + '">' + p.dir + '</span> <code>' + esc(p.name) + '</code>').join(' ')
         : '';
     });
     const showErr = (id, list) => { $(id).innerHTML = list.map(e => '<li>' + esc(e) + '</li>').join(''); };
@@ -562,9 +562,9 @@
     fullYaml = objs.map(o => o.text).join('');
     $('yaml').innerHTML = fullYaml ? highlight(fullYaml) : '<span class="c"># Rien à générer pour le moment</span>';
     $('polTable').innerHTML = objs.length
-      ? '<thead><tr><th>Objet</th><th>Sens</th><th>Pods ciblés</th><th>Règles</th><th></th></tr></thead><tbody>' +
+      ? '<thead><tr><th>Objet</th><th>Sens</th><th>Pods ciblés</th><th>Flux</th><th></th></tr></thead><tbody>' +
         objs.map((o, i) => '<tr><td><code>' + esc(o.name) + '</code></td><td><span class="tag ' + (o.kind === 'ingress' ? 'in' : 'out') + '">' + o.kind + '</span></td><td>' +
-          esc(o.target) + '</td><td>' + (o.rules || 'deny all') + '</td><td><button type="button" class="small" data-copyone="' + i + '">Copier</button></td></tr>').join('') + '</tbody>'
+          esc(o.target) + '</td><td>' + o.rules + '</td><td><button type="button" class="small" data-copyone="' + i + '">Copier</button></td></tr>').join('') + '</tbody>'
       : '';
     // Compteurs / étapes
     $('sgCount').textContent = S.sgs.length + ' groupe' + (S.sgs.length > 1 ? 's' : '');
@@ -590,10 +590,10 @@
     const o = blank();
     if (!d || typeof d !== 'object') return o;
     const str = (v) => typeof v === 'string' ? v : '';
-    if (d.meta) { META.forEach(k => o.meta[k] = str(d.meta[k])); o.meta.defaultDeny = !!d.meta.defaultDeny; }
+    if (d.meta) { META.forEach(k => o.meta[k] = str(d.meta[k])); }
     if (Array.isArray(d.sgs)) o.sgs = d.sgs.map(g => ({ id: str(g.id) || uid(), name: str(g.name), desc: str(g.desc), ips: str(g.ips) }));
     if (Array.isArray(d.flows)) o.flows = d.flows.map(f => ({ id: str(f.id) || uid(), src: str(f.src), dst: str(f.dst), desc: str(f.desc),
-      ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: ['TCP', 'UDP', 'SCTP'].includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort) })) : [] }));
+      ports: Array.isArray(f.ports) ? f.ports.map(p => ({ protocol: ['TCP', 'UDP', 'SCTP'].includes(p.protocol) ? p.protocol : 'TCP', port: str(p.port), endPort: str(p.endPort), app: str(p.app) })) : [] }));
     o.step = [1, 2, 3, 4].includes(d.step) ? d.step : 1;
     return o;
   }
@@ -601,7 +601,6 @@
 
   /* ================= Événements ================= */
   META.forEach(k => $('m_' + k).addEventListener('input', (e) => { S.meta[k] = e.target.value.trim(); if (k === 'ng') renderFlows(); refresh(); }));
-  $('m_defaultDeny').addEventListener('change', (e) => { S.meta.defaultDeny = e.target.checked; refresh(); });
   document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => goStep(+b.dataset.step));
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goStep(+b.dataset.go));
   $('addSg').onclick = () => {
@@ -610,7 +609,7 @@
     const last = $('sgList').lastElementChild; last && last.querySelector('[data-f=name]').focus();
   };
   $('addFlow').onclick = () => {
-    S.flows.push({ id: uid(), src: '', dst: '', desc: '', ports: [{ protocol: 'TCP', port: '', endPort: '' }] });
+    S.flows.push({ id: uid(), src: '', dst: '', desc: '', ports: [{ protocol: 'TCP', port: '', endPort: '', app: '' }] });
     renderFlows(); refresh();
   };
   function flash(msg) { $('status').textContent = msg; setTimeout(() => { $('status').textContent = ''; }, 2000); }
